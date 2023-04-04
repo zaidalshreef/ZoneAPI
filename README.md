@@ -1,4 +1,6 @@
 ZoneAPI
+
+
 ZoneAPI is a simple RESTful API built using .NET Core 7 and PostgreSQL. It allows users to schedule medical appointments with doctors and patients.
 
 Prerequisites
