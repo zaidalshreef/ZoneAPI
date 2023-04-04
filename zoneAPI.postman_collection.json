@@ -1,0 +1,391 @@
+{
+	"info": {
+		"_postman_id": "d817aa28-ad39-4f9b-976d-6150da9e7992",
+		"name": "zoneAPI",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "17183397"
+	},
+	"item": [
+		{
+			"name": "api/Doctors",
+			"item": [
+				{
+					"name": "Doctors",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Doctors",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Doctors"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Doctors/id",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Doctors/2",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Doctors",
+								"2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Doctors/5/appointments?date=2023-04-03",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Doctors/2/appointments?date=2023-04-03",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Doctors",
+								"2",
+								"appointments"
+							],
+							"query": [
+								{
+									"key": "date",
+									"value": "2023-04-03"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Doctors/id",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Doctors/2",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Doctors",
+								"2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Doctors/id",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Doctors/2",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Doctors",
+								"2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Doctors",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Doctors",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Doctors"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "/api/Appointments",
+			"item": [
+				{
+					"name": "Appointments",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Appointments",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Appointments"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appointments/date/{date}",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Appointments/date/2023-04-04",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Appointments",
+								"date",
+								"2023-04-04"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appointments/id",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Appointments/2",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Appointments",
+								"2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appointments/id",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Appointments/2",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Appointments",
+								"2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appointments/id",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Appointments/2",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Appointments",
+								"2"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appointments",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Appointments",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Appointments"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "api/Patients",
+			"item": [
+				{
+					"name": "Patients",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Patients",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Patients"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "/Patients/id",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/api/Patients/1",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Patients",
+								"1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "/Patients/id",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/ api/Patients",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								" api",
+								"Patients"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Patients",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"name\":\"zaid\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://localhost:7200/api/Patients",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								"api",
+								"Patients"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "/Patients/id",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:7200/ api/Patients",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "7200",
+							"path": [
+								" api",
+								"Patients"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
