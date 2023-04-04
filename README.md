@@ -10,7 +10,6 @@
 - [Technologies](#technologies)
 - [Setup](#setup)
 - [API Endpoints](#api-endpoints)
-- [License](#license)
 
 ## Introduction
 
