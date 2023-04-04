@@ -1,0 +1,30 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.33516.290
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ZoneAPI", "ZoneAPI\ZoneAPI.csproj", "{DADB5DAC-53A3-4F1E-994D-71DAAA8C9ABF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{24156001-6C88-4FA6-85FC-426A17345B38}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DADB5DAC-53A3-4F1E-994D-71DAAA8C9ABF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DADB5DAC-53A3-4F1E-994D-71DAAA8C9ABF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DADB5DAC-53A3-4F1E-994D-71DAAA8C9ABF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DADB5DAC-53A3-4F1E-994D-71DAAA8C9ABF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3B346FEC-FB36-40FC-B23F-F46E543E788C}
+	EndGlobalSection
+EndGlobal
