@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -24,29 +26,46 @@ namespace ZoneAPI.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Patient>>> GetPatients()
         {
-          if (_context.Patients == null)
+            var options = new JsonSerializerOptions
+            {
+                ReferenceHandler = ReferenceHandler.Preserve
+            };
+
+            if (_context.Patients == null)
           {
               return NotFound();
           }
-            return await _context.Patients.ToListAsync();
+            var patientsList = await _context.Patients
+                .Include(p => p.Appointments)
+                .ToListAsync();
+            var json = JsonSerializer.Serialize(patientsList, options);
+            return Ok(json);
         }
 
         // GET: api/Patients/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Patient>> GetPatient(int id)
         {
+            var options = new JsonSerializerOptions
+            {
+                ReferenceHandler = ReferenceHandler.Preserve
+            };
+
           if (_context.Patients == null)
           {
               return NotFound();
           }
-            var patient = await _context.Patients.FindAsync(id);
+            var patient = await _context.Patients
+                .Include(p => p.Appointments)
+                .FirstOrDefaultAsync(p => p.Id == id);
 
             if (patient == null)
             {
                 return NotFound();
             }
 
-            return patient;
+            var json = JsonSerializer.Serialize(patient, options);
+            return Ok(json);
         }
 
         // PUT: api/Patients/5
@@ -113,22 +132,6 @@ namespace ZoneAPI.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
-        }
-
-        // GET: api/Patients/5/appointments
-        [HttpGet("{id}/appointments")]
-        public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointmentsForPatient(int id)
-        {
-            var appointments = await _context.Appointments
-                .Where(a => a.PatientId == id)
-                .ToListAsync();
-
-            if (appointments == null || appointments.Count == 0)
-            {
-                return NotFound();
-            }
-
-            return appointments;
         }
 
 

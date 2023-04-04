@@ -17,7 +17,8 @@ builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
 
- 
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 app.UseHttpsRedirection();
 
 app.UseAuthorization();

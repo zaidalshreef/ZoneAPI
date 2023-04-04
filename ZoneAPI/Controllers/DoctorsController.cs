@@ -1,6 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
+using System.Text.Json;
 using ZoneAPI.Models;
+using System.Numerics;
 
 namespace ZoneAPI.Controllers
 {
@@ -19,29 +22,50 @@ namespace ZoneAPI.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Doctor>>> GetDoctors()
         {
-          if (_context.Doctors == null)
+
+            var options = new JsonSerializerOptions
+            {
+                ReferenceHandler = ReferenceHandler.Preserve
+            };
+
+            if (_context.Doctors == null)
           {
               return NotFound();
           }
-            return await _context.Doctors.ToListAsync();
+            var doctorsList = await _context.Doctors
+                .Include(d => d.Appointments)
+                .ToListAsync();
+
+            var json = JsonSerializer.Serialize(doctorsList, options);
+            return Ok(json);
+        
         }
 
         // GET: api/Doctors/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Doctor>> GetDoctor(int id)
         {
+            var options = new JsonSerializerOptions
+            {
+                ReferenceHandler = ReferenceHandler.Preserve
+            };
+
           if (_context.Doctors == null)
           {
               return NotFound();
           }
-            var doctor = await _context.Doctors.FindAsync(id);
+            var doctor = await _context.Doctors
+                .Include(d => d.Appointments)
+                .FirstOrDefaultAsync(d => d.Id == id);
 
             if (doctor == null)
             {
                 return NotFound();
             }
 
-            return doctor;
+            var json = JsonSerializer.Serialize(doctor, options);
+            
+            return Ok(json);
         }
 
         // PUT: api/Doctors/5
@@ -120,10 +144,19 @@ namespace ZoneAPI.Controllers
         [HttpGet("{id}/appointments")]
         public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointmentsForDay(int id, [FromQuery] DateTime date)
         {
+            var options = new JsonSerializerOptions
+            {
+                ReferenceHandler = ReferenceHandler.Preserve
+
+            };
+
             try
             {
+                
                 var appointments = await _context.Appointments
                     .Where(a => a.DoctorId == id && a.Date.Date == date.Date)
+                    .Include(a => a.Doctor)
+                    .Include(a => a.Patient)
                     .ToListAsync();
 
                 if (appointments == null || appointments.Count == 0)
@@ -131,7 +164,9 @@ namespace ZoneAPI.Controllers
                     return NotFound();
                 }
 
-                return Ok(appointments);
+                var json = JsonSerializer.Serialize(appointments, options);
+
+                return Ok(json);
             }
             catch (Exception ex)
             {
