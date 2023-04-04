@@ -1,10 +1,73 @@
-ZoneAPI
+<div align="center">
+
+# ZoneAPI
+
+</div>
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Technologies](#technologies)
+- [Setup](#setup)
+- [API Endpoints](#api-endpoints)
+- [License](#license)
+
+## Introduction
+
+ZoneAPI is a RESTful web service that provides appointment scheduling functionality. The API allows users to create, retrieve, update, and delete appointments, doctors, and patients. 
+
+## Technologies
+
+The following technologies were used to build this project:
+
+- .NET Core 7
+- Entity Framework Core
+- PostgreSQL
+- Visual Studio Code
+- Git
+
+## Setup
+
+1. Clone the repository:
+
+git clone https://github.com/zaidalshreef/ZoneAPI.git
 
 
-ZoneAPI is a simple RESTful API built using .NET Core 7 and PostgreSQL. It allows users to schedule medical appointments with doctors and patients.
+2. Navigate to the project directory:
 
-Prerequisites
-To run this application, you'll need to have the following installed on your machine:
 
-.NET Core 7 SDK
-PostgreSQL
+3. Install the required packages:
+
+
+4. Start the API:
+
+
+## API Endpoints
+
+The following API endpoints are available:
+
+### Appointments
+
+- `GET /api/appointments` - Returns a list of all appointments.
+- `GET /api/appointments/{id}` - Returns an appointment with the specified `id`.
+- `POST /api/appointments` - Creates a new appointment.
+- `PUT /api/appointments/{id}` - Updates an appointment with the specified `id`.
+- `DELETE /api/appointments/{id}` - Deletes an appointment with the specified `id`.
+
+### Doctors
+
+- `GET /api/doctors` - Returns a list of all doctors.
+- `GET /api/doctors/{id}` - Returns a doctor with the specified `id`.
+- `POST /api/doctors` - Creates a new doctor.
+- `PUT /api/doctors/{id}` - Updates a doctor with the specified `id`.
+- `DELETE /api/doctors/{id}` - Deletes a doctor with the specified `id`.
+
+### Patients
+
+- `GET /api/patients` - Returns a list of all patients.
+- `GET /api/patients/{id}` - Returns a patient with the specified `id`.
+- `POST /api/patients` - Creates a new patient.
+- `PUT /api/patients/{id}` - Updates a patient with the specified `id`.
+- `DELETE /api/patients/{id}` - Deletes a patient with the specified `id`.
+
+All API endpoints support JSON request.
