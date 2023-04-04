@@ -25,6 +25,9 @@ The following technologies were used to build this project:
 - Visual Studio Code
 - Git
 
+Postman Collection
+The Postman collection for this API is available, You can import the collection into your own Postman app to test the API endpoints.
+
 ## Setup
 
 1. Clone the repository:
