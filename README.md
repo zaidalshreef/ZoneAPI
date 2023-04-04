@@ -26,8 +26,8 @@ The following technologies were used to build this project:
 - Git
 
 Postman Collection
-A Postman collection is available for testing the API endpoints. To use the collection, follow these steps:
 
+A Postman collection is available for testing the API endpoints. To use the collection, follow these steps:
 Open Postman and click on the Import button in the top left corner.
 Select the Import From file
 Click on the Import button.
