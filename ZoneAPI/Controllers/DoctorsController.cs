@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ZoneAPI.Models;
 
@@ -119,5 +114,30 @@ namespace ZoneAPI.Controllers
         {
             return (_context.Doctors?.Any(e => e.Id == id)).GetValueOrDefault();
         }
+
+
+        // GET: api/Doctors/5/appointments?date=2023-04-03
+        [HttpGet("{id}/appointments")]
+        public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointmentsForDay(int id, [FromQuery] DateTime date)
+        {
+            try
+            {
+                var appointments = await _context.Appointments
+                    .Where(a => a.DoctorId == id && a.Date.Date == date.Date)
+                    .ToListAsync();
+
+                if (appointments == null || appointments.Count == 0)
+                {
+                    return NotFound();
+                }
+
+                return Ok(appointments);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error retrieving appointments: {ex.Message}");
+            }
+        }
+
     }
-}
+    }

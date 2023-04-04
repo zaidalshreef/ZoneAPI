@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ZoneAPI.Models;
@@ -24,11 +26,12 @@ namespace ZoneAPI.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointments()
         {
-          if (_context.Appointments == null)
-          {
-              return NotFound();
-          }
-            return await _context.Appointments.ToListAsync();
+            var appointmentsList = await _context.Appointments.ToListAsync();
+            if (appointmentsList == null)
+            {
+                return NotFound();
+            }
+            return Ok(appointmentsList);
         }
 
         // GET: api/Appointments/5
@@ -46,7 +49,7 @@ namespace ZoneAPI.Controllers
                 return NotFound();
             }
 
-            return appointment;
+            return Ok(appointment);
         }
 
         // PUT: api/Appointments/5
@@ -57,6 +60,16 @@ namespace ZoneAPI.Controllers
             if (id != appointment.Id)
             {
                 return BadRequest();
+            }
+
+            // Validate the appointment
+            var validationContext = new ValidationContext(appointment, serviceProvider: null, items: null);
+            var validationResults = new List<ValidationResult>();
+            var isValid = Validator.TryValidateObject(appointment, validationContext, validationResults, validateAllProperties: true);
+
+            if (!isValid)
+            {
+                return BadRequest(validationResults);
             }
 
             _context.Entry(appointment).State = EntityState.Modified;
@@ -85,10 +98,19 @@ namespace ZoneAPI.Controllers
         [HttpPost]
         public async Task<ActionResult<Appointment>> PostAppointment(Appointment appointment)
         {
-          if (_context.Appointments == null)
-          {
-              return Problem("Entity set 'ApplicationDbContext.Appointments'  is null.");
-          }
+            if (_context.Appointments == null)
+            {
+                return Problem("Entity set 'ApplicationDbContext.Appointments'  is null.");
+            }
+
+            var validationContext = new ValidationContext(appointment, serviceProvider: null, items: null);
+            var validationResults = new List<ValidationResult>();
+            bool isValid = Validator.TryValidateObject(appointment, validationContext, validationResults, true);
+            if (!isValid)
+            {
+                return BadRequest(validationResults);
+            }
+
             _context.Appointments.Add(appointment);
             await _context.SaveChangesAsync();
 
@@ -115,9 +137,28 @@ namespace ZoneAPI.Controllers
             return NoContent();
         }
 
+        [HttpGet]
+        [Route("date/{date}")]
+        public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointmentsForDate(DateTime date)
+        {
+            var appointments = await _context.Appointments
+                .Where(a => a.Date.Date == date.Date)
+                .ToListAsync();
+
+            if (appointments == null || appointments.Count == 0)
+            {
+                return NotFound();
+            }
+
+            return Ok(appointments);
+        }
+
+
         private bool AppointmentExists(int id)
         {
             return (_context.Appointments?.Any(e => e.Id == id)).GetValueOrDefault();
         }
+
+
     }
 }

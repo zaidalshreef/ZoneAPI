@@ -115,6 +115,23 @@ namespace ZoneAPI.Controllers
             return NoContent();
         }
 
+        // GET: api/Patients/5/appointments
+        [HttpGet("{id}/appointments")]
+        public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointmentsForPatient(int id)
+        {
+            var appointments = await _context.Appointments
+                .Where(a => a.PatientId == id)
+                .ToListAsync();
+
+            if (appointments == null || appointments.Count == 0)
+            {
+                return NotFound();
+            }
+
+            return appointments;
+        }
+
+
         private bool PatientExists(int id)
         {
             return (_context.Patients?.Any(e => e.Id == id)).GetValueOrDefault();
