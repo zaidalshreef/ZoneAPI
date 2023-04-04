@@ -22,7 +22,7 @@ The following technologies were used to build this project:
 - .NET Core 7
 - Entity Framework Core
 - PostgreSQL
-- Visual Studio Code
+- Visual Studio
 - Git
 
 Postman Collection
