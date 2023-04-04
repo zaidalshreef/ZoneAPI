@@ -26,7 +26,13 @@ The following technologies were used to build this project:
 - Git
 
 Postman Collection
-The Postman collection for this API is available, You can import the collection into your own Postman app to test the API endpoints.
+A Postman collection is available for testing the API endpoints. To use the collection, follow these steps:
+
+Open Postman and click on the Import button in the top left corner.
+Select the Import From file
+Click on the Import button.
+You should now see the ZoneAPI collection in your Postman workspace. You can use this collection to test the API endpoints.
+
 
 ## Setup
 
