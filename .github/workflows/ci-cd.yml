@@ -69,6 +69,16 @@ jobs:
       run: terraform fmt -check
       working-directory: ./terraform
     
+    - name: Setup Terraform Backend (if needed)
+      run: |
+        # Check if backend storage account exists, create if not
+        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
+          echo "Setting up Terraform backend..."
+          ./scripts/setup-terraform-backend.sh
+        else
+          echo "Terraform backend already exists"
+        fi
+    
     - name: Terraform Init
       run: terraform init
       working-directory: ./terraform

@@ -11,6 +11,14 @@ terraform {
     }
   }
   required_version = ">= 1.0"
+  
+  # Remote backend for state management
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "tfstatezoneapi"
+    container_name       = "tfstate"
+    key                  = "terraform.tfstate"
+  }
 }
 
 # Configure the Microsoft Azure Provider
