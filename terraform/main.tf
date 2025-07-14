@@ -29,6 +29,7 @@ provider "azurerm" {
   use_cli                    = false
   use_msi                    = false
   use_oidc                   = false
+  use_azure_cli_auth         = false
   skip_provider_registration = true
 }
 
