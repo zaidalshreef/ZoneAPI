@@ -11,7 +11,7 @@ terraform {
     }
   }
   required_version = ">= 1.0"
-  
+
   # Remote backend for state management
   backend "azurerm" {
     resource_group_name  = "rg-terraform-state"
