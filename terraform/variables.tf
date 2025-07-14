@@ -14,7 +14,7 @@ variable "environment" {
 variable "location" {
   description = "Azure region for resource deployment"
   type        = string
-  default     = "East US"
+  default     = "East US 2"
 }
 
 # AKS configuration variables
