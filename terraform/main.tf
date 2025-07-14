@@ -32,7 +32,7 @@ locals {
     Project     = var.project_name
     ManagedBy   = "Terraform"
   }
-  
+
   resource_prefix = "${var.project_name}-${var.environment}-${random_string.suffix.result}"
 }
 
@@ -62,11 +62,11 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   administrator_login    = var.postgres_admin_username
   administrator_password = var.postgres_admin_password
   zone                   = "1"
-  
+
   storage_mb = 32768
-  
+
   sku_name = "B_Standard_B1ms"
-  
+
   tags = local.common_tags
 }
 
@@ -92,22 +92,22 @@ resource "azurerm_kubernetes_cluster" "aks" {
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   dns_prefix          = "aks-${local.resource_prefix}"
-  
+
   default_node_pool {
     name       = "default"
     node_count = var.aks_node_count
     vm_size    = var.aks_vm_size
   }
-  
+
   identity {
     type = "SystemAssigned"
   }
-  
+
   network_profile {
     network_plugin = "azure"
     network_policy = "azure"
   }
-  
+
   tags = local.common_tags
 }
 
