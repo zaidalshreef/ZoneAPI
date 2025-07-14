@@ -1,0 +1,17 @@
+apiVersion: v2
+name: zoneapi
+description: A Helm chart for ZoneAPI - A .NET Web API application
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - api
+  - dotnet
+  - healthcare
+  - appointments
+home: https://github.com/your-org/zoneapi
+sources:
+  - https://github.com/your-org/zoneapi
+maintainers:
+  - name: DevOps Team
+    email: devops@example.com 
