@@ -27,7 +27,7 @@ variable "aks_node_count" {
 variable "aks_vm_size" {
   description = "VM size for AKS nodes"
   type        = string
-  default     = "Standard_B1s"
+  default     = "Standard_B2s"
 }
 
 # PostgreSQL configuration variables
