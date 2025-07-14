@@ -12,6 +12,10 @@ COPY ZoneAPI/ ZoneAPI/
 WORKDIR /app/ZoneAPI
 RUN dotnet publish -c Release -o out
 
+# Install EF Core tools globally and add to PATH
+RUN dotnet tool install --global dotnet-ef --version 7.0.4
+ENV PATH="$PATH:/root/.dotnet/tools"
+
 # Create migration bundle
 RUN dotnet ef migrations bundle -o efbundle --self-contained -r linux-x64 --verbose
 
