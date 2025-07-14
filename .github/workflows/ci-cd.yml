@@ -115,6 +115,11 @@ jobs:
         echo "resource-group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
         echo "postgres-host=$(terraform output -raw postgres_server_fqdn)" >> $GITHUB_OUTPUT
       working-directory: ./terraform
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
   # Docker Build and Push Job
   docker-build-push:
@@ -153,6 +158,7 @@ jobs:
       id: acr-info
       run: |
         cd terraform
+        terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
         ACR_USERNAME=$(terraform output -raw acr_admin_username)
         ACR_PASSWORD=$(terraform output -raw acr_admin_password)
