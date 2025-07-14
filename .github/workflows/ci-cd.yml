@@ -248,17 +248,35 @@ jobs:
     
     - name: Run database migrations
       run: |
-        kubectl run migration-job-${{ github.run_number }} \
-          --image=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }} \
-          --restart=Never \
-          --namespace=zoneapi \
-          --env="ASPNETCORE_ENVIRONMENT=Production" \
-          --env="DB_HOST=${{ needs.deploy-infrastructure.outputs.postgres-host }}" \
-          --env="DB_PORT=5432" \
-          --env="DB_NAME=zone" \
-          --env="DB_USER=postgres" \
-          --env="DB_PASSWORD=${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
-          --command -- dotnet ef database update --project ZoneAPI.csproj
+        cat <<EOF | kubectl apply -f -
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: migration-job-${{ github.run_number }}
+          namespace: zoneapi
+        spec:
+          template:
+            spec:
+              containers:
+              - name: migration
+                image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
+                command: ["dotnet", "ef", "database", "update", "--project", "ZoneAPI.csproj"]
+                env:
+                - name: ASPNETCORE_ENVIRONMENT
+                  value: "Production"
+                - name: DB_HOST
+                  value: "${{ needs.deploy-infrastructure.outputs.postgres-host }}"
+                - name: DB_PORT
+                  value: "5432"
+                - name: DB_NAME
+                  value: "zone"
+                - name: DB_USER
+                  value: "postgres"
+                - name: DB_PASSWORD
+                  value: "${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+              restartPolicy: Never
+          backoffLimit: 3
+        EOF
         
         kubectl wait --for=condition=complete job/migration-job-${{ github.run_number }} --namespace=zoneapi --timeout=300s
         kubectl delete job migration-job-${{ github.run_number }} --namespace=zoneapi
