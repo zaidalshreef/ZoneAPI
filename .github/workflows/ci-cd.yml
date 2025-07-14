@@ -273,12 +273,11 @@ jobs:
               containers:
               - name: migration
                 image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
-                command: ["dotnet", "ef", "database", "update", "--project", "ZoneAPI.csproj", "--verbose"]
+                command: ["./efbundle"]
+                args: ["--connection", "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};Command Timeout=300;Connection Timeout=60;"]
                 env:
                 - name: ASPNETCORE_ENVIRONMENT
                   value: "Production"
-                - name: ConnectionStrings__PostgreSQLConnection
-                  value: "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};Command Timeout=300;Connection Timeout=60;"
                 - name: DOTNET_ENVIRONMENT
                   value: "Production"
               restartPolicy: Never
