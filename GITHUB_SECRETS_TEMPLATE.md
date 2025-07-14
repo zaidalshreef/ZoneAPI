@@ -17,10 +17,10 @@ ARM_TENANT_ID = <your-azure-tenant-id>
 
 ```json
 AZURE_CREDENTIALS = {
-  "appId": "<your-service-principal-client-id>",
-  "displayName": "<your-service-principal-display-name>",
-  "password": "<your-service-principal-client-secret>",
-  "tenant": "<your-azure-tenant-id>"
+  "clientId": "<your-service-principal-client-id>",
+  "clientSecret": "<your-service-principal-client-secret>",
+  "tenantId": "<your-azure-tenant-id>",
+  "subscriptionId": "<your-azure-subscription-id>"
 }
 ```
 
