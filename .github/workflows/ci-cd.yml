@@ -257,28 +257,35 @@ jobs:
         spec:
           template:
             spec:
-              containers:
-              - name: migration
-                image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
-                command: ["dotnet", "ef", "database", "update", "--project", "ZoneAPI.csproj"]
+              initContainers:
+              - name: wait-for-db
+                image: postgres:13
+                command: ['sh', '-c', 'until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do echo "Waiting for database..."; sleep 2; done; echo "Database is ready!"']
                 env:
-                - name: ASPNETCORE_ENVIRONMENT
-                  value: "Production"
                 - name: DB_HOST
                   value: "${{ needs.deploy-infrastructure.outputs.postgres-host }}"
                 - name: DB_PORT
                   value: "5432"
-                - name: DB_NAME
-                  value: "zone"
                 - name: DB_USER
                   value: "postgres"
-                - name: DB_PASSWORD
+                - name: PGPASSWORD
                   value: "${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+              containers:
+              - name: migration
+                image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
+                command: ["dotnet", "ef", "database", "update", "--project", "ZoneAPI.csproj", "--verbose"]
+                env:
+                - name: ASPNETCORE_ENVIRONMENT
+                  value: "Production"
+                - name: ConnectionStrings__PostgreSQLConnection
+                  value: "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};Command Timeout=300;Connection Timeout=60;"
+                - name: DOTNET_ENVIRONMENT
+                  value: "Production"
               restartPolicy: Never
           backoffLimit: 3
         EOF
         
-        kubectl wait --for=condition=complete job/migration-job-${{ github.run_number }} --namespace=zoneapi --timeout=300s
+        kubectl wait --for=condition=complete job/migration-job-${{ github.run_number }} --namespace=zoneapi --timeout=600s
         kubectl delete job migration-job-${{ github.run_number }} --namespace=zoneapi
     
     - name: Deploy application with Helm
