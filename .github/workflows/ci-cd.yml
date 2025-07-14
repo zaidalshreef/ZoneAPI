@@ -216,6 +216,12 @@ jobs:
       with:
         version: ${{ env.HELM_VERSION }}
     
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
+        terraform_wrapper: false
+    
     - name: Get AKS credentials
       run: |
         az aks get-credentials \
@@ -227,6 +233,7 @@ jobs:
       id: acr-info
       run: |
         cd terraform
+        terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
         echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
       env:
