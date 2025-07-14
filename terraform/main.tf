@@ -61,7 +61,6 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   version                = "14"
   administrator_login    = var.postgres_admin_username
   administrator_password = var.postgres_admin_password
-  zone                   = "1"
 
   storage_mb = 32768
 
