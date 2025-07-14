@@ -24,6 +24,12 @@ terraform {
 # Configure the Microsoft Azure Provider
 provider "azurerm" {
   features {}
+
+  # Use Service Principal authentication in CI/CD
+  use_cli                    = false
+  use_msi                    = false
+  use_oidc                   = false
+  skip_provider_registration = true
 }
 
 # Create a random suffix for resources to avoid naming conflicts
