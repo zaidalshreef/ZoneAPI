@@ -7,7 +7,6 @@ on:
     branches: [ main, master ]
 
 env:
-  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
   IMAGE_NAME: zoneapi
   HELM_VERSION: 3.12.0
 
@@ -41,55 +40,10 @@ jobs:
         path: ZoneAPI/bin/Release/
         retention-days: 1
 
-  # Docker Build and Push Job
-  docker-build-push:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
-    
-    outputs:
-      image-tag: ${{ steps.image-tag.outputs.tag }}
-      image-digest: ${{ steps.build.outputs.digest }}
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Generate image tag
-      id: image-tag
-      run: |
-        if [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.ref }}" == "refs/heads/master" ]; then
-          echo "tag=latest" >> $GITHUB_OUTPUT
-        else
-          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Azure Login
-      uses: azure/login@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Build and push Docker image
-      id: build
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: false
-        tags: ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
-        labels: |
-          org.opencontainers.image.title=${{ env.IMAGE_NAME }}
-          org.opencontainers.image.description=ZoneAPI - Healthcare Appointment Management System
-          org.opencontainers.image.source=${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
   # Infrastructure Deployment Job
   deploy-infrastructure:
     runs-on: ubuntu-latest
-    needs: docker-build-push
+    needs: build-and-test
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     outputs:
@@ -152,10 +106,79 @@ jobs:
         echo "postgres-host=$(terraform output -raw postgres_server_fqdn)" >> $GITHUB_OUTPUT
       working-directory: ./terraform
 
+  # Docker Build and Push Job
+  docker-build-push:
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    outputs:
+      image-tag: ${{ steps.image-tag.outputs.tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Generate image tag
+      id: image-tag
+      run: |
+        if [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.ref }}" == "refs/heads/master" ]; then
+          echo "tag=latest" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Get ACR login server from Terraform
+      id: acr-info
+      run: |
+        cd terraform
+        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+        ACR_USERNAME=$(terraform output -raw acr_admin_username)
+        ACR_PASSWORD=$(terraform output -raw acr_admin_password)
+        echo "::add-mask::$ACR_PASSWORD"
+        echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+        echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+        echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+    
+    - name: Log in to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ steps.acr-info.outputs.login-server }}
+        username: ${{ steps.acr-info.outputs.username }}
+        password: ${{ steps.acr-info.outputs.password }}
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+        labels: |
+          org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+          org.opencontainers.image.description=ZoneAPI - Healthcare Appointment Management System
+          org.opencontainers.image.source=${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
   # Application Deployment Job
   deploy-application:
     runs-on: ubuntu-latest
-    needs: [docker-build-push, deploy-infrastructure]
+    needs: [deploy-infrastructure, docker-build-push]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     steps:
@@ -178,6 +201,18 @@ jobs:
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
     
+    - name: Get ACR login server from Terraform
+      id: acr-info
+      run: |
+        cd terraform
+        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+        echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+    
     - name: Create namespace if not exists
       run: |
         kubectl create namespace zoneapi --dry-run=client -o yaml | kubectl apply -f -
@@ -185,7 +220,7 @@ jobs:
     - name: Run database migrations
       run: |
         kubectl run migration-job-${{ github.run_number }} \
-          --image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }} \
+          --image=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }} \
           --restart=Never \
           --namespace=zoneapi \
           --env="ASPNETCORE_ENVIRONMENT=Production" \
@@ -203,7 +238,7 @@ jobs:
       run: |
         helm upgrade --install zoneapi ./charts/zoneapi \
           --namespace zoneapi \
-          --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+          --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
           --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
           --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
@@ -264,7 +299,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
+        image-ref: ${{ steps.acr-creds.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
         format: 'sarif'
         output: 'trivy-results.sarif'
     
