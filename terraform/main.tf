@@ -132,12 +132,10 @@ resource "azurerm_kubernetes_cluster" "aks" {
   tags = local.common_tags
 }
 
-# NOTE: This role assignment requires "User Access Administrator" permissions
-# If you get permission errors, grant the service principal higher permissions:
-# az role assignment create --assignee <service-principal-id> --role "User Access Administrator" --scope /subscriptions/<subscription-id>
-#
-# resource "azurerm_role_assignment" "aks_acr_pull" {
-#   scope                = azurerm_container_registry.acr.id
-#   role_definition_name = "AcrPull"
-#   principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
-# } 
+# Give AKS permission to pull images from ACR
+# Service principal now has "User Access Administrator" permissions
+resource "azurerm_role_assignment" "aks_acr_pull" {
+  scope                = azurerm_container_registry.acr.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
+} 
