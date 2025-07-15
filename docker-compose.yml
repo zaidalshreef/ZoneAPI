@@ -22,21 +22,22 @@ services:
     networks:
       - zoneapi-network
 
-  # Database Migration Service (runs once)
+  # Database Migration Service (runs once) - Using migration bundle
   migration:
-    image: mcr.microsoft.com/dotnet/sdk:7.0
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: zoneapi-migration
     depends_on:
       db:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__PostgreSQLConnection: "Host=db;Port=5432;Database=zone;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres123};CommandTimeout=300;Timeout=60;"
-    command: ["sh", "-c", "cd /app && dotnet tool install --global dotnet-ef --version 7.0.4 && export PATH=\"$PATH:/root/.dotnet/tools\" && dotnet ef database update --verbose"]
+      DOTNET_BUNDLE_EXTRACT_BASE_DIR: /tmp
+    user: root
+    entrypoint: ["/app/efbundle"]
+    command: ["--connection", "Host=db;Port=5432;Database=zone;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres123};CommandTimeout=300;Timeout=60;"]
     restart: "no"
-    volumes:
-      - ./ZoneAPI:/app
-    working_dir: /app
     networks:
       - zoneapi-network
     logging:

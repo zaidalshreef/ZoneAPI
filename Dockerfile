@@ -12,9 +12,10 @@ COPY ZoneAPI/ ZoneAPI/
 WORKDIR /app/ZoneAPI
 RUN dotnet publish -c Release -o out
 
-# Install EF Core tools globally and add to PATH
+# Install EF Core tools globally and create migration bundle
 RUN dotnet tool install --global dotnet-ef --version 7.0.4
 ENV PATH="$PATH:/root/.dotnet/tools"
+RUN dotnet ef migrations bundle --self-contained -o /app/efbundle
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:7.0
@@ -29,9 +30,9 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 # Copy published application
 COPY --from=build-env /app/ZoneAPI/out .
 
-# Copy EF Core tools for migrations
-COPY --from=build-env /root/.dotnet/tools /root/.dotnet/tools
-ENV PATH="$PATH:/root/.dotnet/tools"
+# Copy migration bundle
+COPY --from=build-env /app/efbundle /app/efbundle
+RUN chmod +x /app/efbundle
 
 # Change ownership to appuser
 RUN chown -R appuser:appuser /app

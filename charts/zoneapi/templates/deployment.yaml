@@ -27,6 +27,27 @@ spec:
       serviceAccountName: {{ include "zoneapi.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: database-migration
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/efbundle"]
+          args: 
+            - "--connection"
+            - "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: DOTNET_BUNDLE_EXTRACT_BASE_DIR
+              value: "/tmp"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "zoneapi.fullname" . }}-db-secret
+                  key: password
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
