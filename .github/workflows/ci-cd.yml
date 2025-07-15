@@ -157,11 +157,24 @@ jobs:
     - name: Get ACR login server from Terraform
       id: acr-info
       run: |
+        # Setup Terraform backend (since this is a separate job)
+        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
+          echo "Setting up Terraform backend..."
+          ./scripts/setup-terraform-backend.sh
+        else
+          echo "Terraform backend already exists"
+        fi
+        
         cd terraform
-        # Ensure Terraform is initialized
+        # Initialize Terraform with backend
         terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+        ACR_USERNAME=$(terraform output -raw acr_admin_username)
+        ACR_PASSWORD=$(terraform output -raw acr_admin_password)
+        echo "::add-mask::$ACR_PASSWORD"
         echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+        echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+        echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
