@@ -98,20 +98,20 @@ healthCheck:
 livenessProbe:
   enabled: true
   path: /health
-  initialDelaySeconds: 60  # Give app sufficient time to start
+  initialDelaySeconds: 90  # Give app more time to start and connect to DB
   periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 5  # Be more forgiving during startup
+  timeoutSeconds: 30  # Increased timeout for slower responses
+  failureThreshold: 6  # Be more forgiving during startup
   successThreshold: 1
 
 # Readiness probe (when to start receiving traffic) - Updated for .NET 7.0
 readinessProbe:
   enabled: true
   path: /health
-  initialDelaySeconds: 30  # Allow proper startup time
-  periodSeconds: 10
-  timeoutSeconds: 10
-  failureThreshold: 3  # Reasonable failure threshold
+  initialDelaySeconds: 45  # Allow proper startup time
+  periodSeconds: 15
+  timeoutSeconds: 20  # Increased timeout for database connectivity checks
+  failureThreshold: 5  # More forgiving failure threshold
   successThreshold: 1
 
 # Deployment strategy

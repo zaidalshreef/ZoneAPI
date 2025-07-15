@@ -37,7 +37,7 @@ spec:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "zoneapi.fullname" . }}-db-secret
+                  name: zoneapi-db-secret
                   key: password
           securityContext:
             runAsUser: 0  # Run as root for migration bundle execution
