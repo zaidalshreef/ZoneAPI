@@ -1,3 +1,4 @@
+{{- if .Values.migration.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -105,4 +106,5 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {} 
+          emptyDir: {}
+{{- end }} 

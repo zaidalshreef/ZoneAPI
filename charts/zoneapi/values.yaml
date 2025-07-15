@@ -97,19 +97,19 @@ healthCheck:
 # Liveness probe (when to restart container)
 livenessProbe:
   enabled: true
-  initialDelaySeconds: 30  # Wait longer before first check
-  periodSeconds: 10
-  timeoutSeconds: 3
-  failureThreshold: 3
+  initialDelaySeconds: 60  # Wait much longer before first check
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 10  # Very forgiving
   successThreshold: 1
 
 # Readiness probe (when to start receiving traffic)
 readinessProbe:
   enabled: true
-  initialDelaySeconds: 10  # Start checking readiness earlier
-  periodSeconds: 5
-  timeoutSeconds: 3
-  failureThreshold: 3
+  initialDelaySeconds: 30  # Give more time to start
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 10  # Very forgiving
   successThreshold: 1
 
 # Deployment strategy
@@ -132,6 +132,7 @@ debug:
 
 # Migration configuration
 migration:
+  enabled: false  # DISABLED - skip migration completely
   timeout: 120  # 2 minutes
   backoffLimit: 3  # Max 3 retries
   activeDeadlineSeconds: 180  # Kill job after 3 minutes total

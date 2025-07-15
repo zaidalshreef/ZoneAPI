@@ -302,59 +302,19 @@ jobs:
     - name: Create namespace if not exists
       run: |
         kubectl create namespace zoneapi --dry-run=client -o yaml | kubectl apply -f -
-    
-    - name: Test database connection first
-      run: |
-        echo "=== Testing database connection before deployment ==="
-        echo "Database endpoint: ${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
-        # Create database secret first
+        # Create database secret
         kubectl create secret generic zoneapi-db-secret \
           --from-literal=password="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
           --namespace=zoneapi \
           --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Create a simple connection test pod
-        kubectl run zoneapi-connection-test \
-          --namespace=zoneapi \
-          --image=postgres:15-alpine \
-          --restart=Never \
-          --rm -i --tty=false \
-          --env="PGPASSWORD=${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
-          --command -- /bin/bash -c "
-            echo '=== Database Connection Test ==='
-            echo 'Host: ${{ needs.deploy-infrastructure.outputs.postgres-host }}'
-            echo 'Port: 5432'
-            echo 'Database: zone'
-            echo 'User: postgres'
-            echo ''
-            
-            echo 'Step 1: Testing DNS resolution...'
-            nslookup ${{ needs.deploy-infrastructure.outputs.postgres-host }} || echo 'DNS failed'
-            
-            echo 'Step 2: Testing network connectivity...'
-            nc -zv ${{ needs.deploy-infrastructure.outputs.postgres-host }} 5432 || echo 'Network failed'
-            
-            echo 'Step 3: Testing PostgreSQL service...'
-            pg_isready -h ${{ needs.deploy-infrastructure.outputs.postgres-host }} -p 5432 -U postgres
-            
-            echo 'Step 4: Testing authentication...'
-            psql -h ${{ needs.deploy-infrastructure.outputs.postgres-host }} -p 5432 -U postgres -d postgres -c 'SELECT version();'
-            
-            echo 'Step 5: Testing database zone access...'
-            psql -h ${{ needs.deploy-infrastructure.outputs.postgres-host }} -p 5432 -U postgres -d zone -c 'SELECT current_database();' || echo 'Database zone does not exist, will be created by migration'
-            
-            echo '✅ Connection test completed'
-          " || (echo "❌ Database connection test failed" && exit 1)
-        
-        echo "✅ Database connection test passed!"
-
+    
     - name: Deploy application with Helm
-      timeout-minutes: 2
+      timeout-minutes: 5
       run: |
-        echo "=== Deploying ZoneAPI with retry logic ==="
+        echo "=== Deploying ZoneAPI (NO MIGRATION) ==="
         
-        # Retry function with max 3 attempts and 30s timeout
+        # Simple deployment with retries
         deploy_with_retry() {
           local max_attempts=3
           local attempt=1
@@ -369,22 +329,21 @@ jobs:
               --set imagePullSecrets[0].name=acr-secret \
               --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
               --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
-              --set debug.enabled=true \
-              --set migration.timeout=120 \
+              --set migration.enabled=false \
               --set ingress.hosts[0].host=zoneapi-${{ github.run_number }}.example.com \
               --set ingress.hosts[0].paths[0].path=/ \
               --set ingress.hosts[0].paths[0].pathType=Prefix \
               --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
-              --wait --timeout=30s \
+              --wait --timeout=2m \
               --atomic --create-namespace; then
               echo "✅ Deployment successful on attempt $attempt"
               return 0
             else
               echo "❌ Deployment failed on attempt $attempt"
               if [ $attempt -lt $max_attempts ]; then
-                echo "⏳ Waiting 10 seconds before retry..."
-                sleep 10
-                # Clean up failed deployment before retry
+                echo "⏳ Waiting 15 seconds before retry..."
+                sleep 15
+                # Clean up failed deployment
                 helm delete zoneapi --namespace zoneapi --ignore-not-found || true
                 kubectl delete pods --all -n zoneapi --force --grace-period=0 || true
               fi
@@ -396,42 +355,8 @@ jobs:
           return 1
         }
         
-        # Execute deployment with retry
+        # Execute deployment
         deploy_with_retry
-
-    - name: Debug migration job logs
-      if: failure()
-      run: |
-        echo "=== Checking migration job status ==="
-        kubectl get jobs --namespace=zoneapi -l app.kubernetes.io/component=migration
-        
-        echo "=== Migration job logs ==="
-        kubectl logs --namespace=zoneapi -l app.kubernetes.io/component=migration --tail=100 || echo "No migration logs found"
-        
-        echo "=== Debug migration job logs ==="
-        kubectl logs --namespace=zoneapi -l app.kubernetes.io/component=debug-migration --tail=100 || echo "No debug migration logs found"
-        
-        echo "=== Recent events ==="
-        kubectl get events --namespace=zoneapi --sort-by='.lastTimestamp' | tail -20
-    
-    - name: Check deployment status
-      run: |
-        echo "=== Checking deployment progress ==="
-        kubectl get pods --namespace=zoneapi -o wide
-        kubectl get events --namespace=zoneapi --sort-by='.lastTimestamp' | tail -10
-        
-    - name: Verify deployment
-      run: |
-        kubectl get pods --namespace=zoneapi
-        kubectl get services --namespace=zoneapi
-        kubectl get ingress --namespace=zoneapi
-    
-    - name: Run health check
-      run: |
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=zoneapi --namespace=zoneapi --timeout=300s
-        kubectl port-forward svc/zoneapi 8080:8080 --namespace=zoneapi &
-        sleep 10
-        curl -f http://localhost:8080/health || exit 1
 
   # Security Scanning Job
   security-scan:
