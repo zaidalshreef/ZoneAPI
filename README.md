@@ -1,92 +1,28 @@
-# ZoneAPI - Cloud-Native Healthcare Management System
+# ZoneAPI - Healthcare Appointment Management System
 
-ZoneAPI is a comprehensive healthcare appointment management system built with .NET 7.0 and designed for cloud-native deployment. This repository includes complete CI/CD pipeline implementation with Azure Kubernetes Service (AKS) deployment using infrastructure-as-code principles.
-
-## 🚀 Overview
-
-This project demonstrates a complete DevOps solution featuring:
-
-- **Containerized .NET 7.0 Web API** for healthcare appointment management
-- **Azure Kubernetes Service (AKS)** deployment with auto-scaling
-- **Infrastructure as Code** using Terraform
-- **CI/CD Pipeline** with GitHub Actions
-- **Helm Charts** for application deployment
-- **PostgreSQL** database with automated migrations
-- **Security scanning** and monitoring capabilities
+A RESTful API built with ASP.NET Core for managing healthcare appointments, doctors, and patients. The system is deployed on Azure using Kubernetes (AKS) with automated CI/CD pipelines.
 
 ## 🏗️ Architecture
 
-### CI/CD Pipeline Flow
+- **Backend**: ASP.NET Core 7.0 Web API
+- **Database**: PostgreSQL (Azure Database for PostgreSQL - Flexible Server)
+- **Container Registry**: Azure Container Registry (ACR)
+- **Orchestration**: Azure Kubernetes Service (AKS)
+- **Infrastructure**: Terraform (Infrastructure as Code)
+- **CI/CD**: GitHub Actions
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Code Push     │───▶│   Build & Test  │───▶│  Docker Build   │
-│   (GitHub)      │    │   (.NET 7.0)    │    │   & Push (ACR)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                         │
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Monitoring    │◀───│   AKS Deploy    │◀───│  Infrastructure │
-│   & Security    │    │   (Helm Chart)  │    │   (Terraform)   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+## 📚 Documentation
 
-### Azure Infrastructure
+### Core Documentation
+- **[Database Migration Troubleshooting](docs/database-migration-troubleshooting.md)** - Comprehensive guide for resolving database and migration issues
+- **[Quick Reference Guide](docs/quick-reference.md)** - Essential commands and configurations for debugging
+- **[Terraform State Management](docs/terraform-state-management.md)** - Infrastructure state management guidelines
 
-- **Resource Group**: Container for all resources
-- **AKS Cluster**: Managed Kubernetes with auto-scaling (2-10 nodes)
-- **Azure Container Registry (ACR)**: Private container registry
-- **PostgreSQL Flexible Server**: Managed database service
-- **Application Gateway**: Load balancer and SSL termination
-- **Azure Monitor**: Logging and monitoring
+### Troubleshooting Tools
+- **[Database Connection Test Script](scripts/test-db-connection.sh)** - Manual database connectivity testing
+- **[GitHub Secrets Template](GITHUB_SECRETS_TEMPLATE.md)** - Required CI/CD configuration
 
-## 🛠️ Technology Stack
-
-### Application
-- **.NET 7.0**: Modern, cross-platform framework
-- **Entity Framework Core**: ORM with PostgreSQL provider
-- **ASP.NET Core**: Web API framework
-- **Health Checks**: Built-in monitoring endpoints
-
-### DevOps & Infrastructure
-- **Docker**: Multi-stage containerization
-- **Kubernetes**: Container orchestration
-- **Helm**: Package manager for Kubernetes
-- **Terraform**: Infrastructure as Code
-- **GitHub Actions**: CI/CD automation
-- **Azure**: Cloud platform
-
-### Security & Monitoring
-- **Trivy**: Container vulnerability scanning
-- **Azure Security Center**: Cloud security posture
-- **Prometheus**: Metrics collection
-- **Grafana**: Monitoring dashboards
-
-## 📁 Project Structure
-
-```
-ZoneAPI/
-├── .github/workflows/          # GitHub Actions CI/CD pipeline
-│   └── ci-cd.yml
-├── ZoneAPI/                    # .NET Application
-│   ├── Controllers/            # API controllers
-│   ├── Models/                 # Data models
-│   ├── Migrations/             # EF Core migrations
-│   └── Program.cs              # Application entry point
-├── terraform/                  # Infrastructure as Code
-│   ├── main.tf                 # Main Terraform configuration
-│   ├── variables.tf            # Variable definitions
-│   ├── outputs.tf              # Output definitions
-│   └── terraform.tfvars.example # Example configuration
-├── charts/zoneapi/             # Helm chart
-│   ├── Chart.yaml              # Chart metadata
-│   ├── values.yaml             # Default values
-│   └── templates/              # Kubernetes manifests
-├── Dockerfile                  # Multi-stage container build
-├── .dockerignore               # Docker build context exclusions
-└── README.md                   # This file
-```
-
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
