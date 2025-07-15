@@ -30,8 +30,8 @@ spec:
               echo "Waiting for PostgreSQL to be ready..."
               echo "Host: $DB_HOST, Port: $DB_PORT, User: $DB_USER"
               
-              # Wait up to 5 minutes for database
-              for i in {1..60}; do
+              # Wait up to 2 minutes for database (24 attempts x 5 seconds = 2 minutes)
+              for i in {1..24}; do
                 if pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; then
                   echo "PostgreSQL is ready!"
                   
@@ -43,12 +43,12 @@ spec:
                     echo "PostgreSQL is ready but connection failed. Retrying..."
                   fi
                 else
-                  echo "PostgreSQL is not ready yet. Attempt $i/60..."
+                  echo "PostgreSQL is not ready yet. Attempt $i/24..."
                 fi
                 sleep 5
               done
               
-              echo "Database readiness check failed after 5 minutes"
+              echo "Database readiness check failed after 2 minutes"
               exit 1
           env:
             - name: DB_HOST

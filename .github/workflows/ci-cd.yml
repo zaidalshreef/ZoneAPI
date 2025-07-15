@@ -246,8 +246,39 @@ jobs:
       run: |
         kubectl create namespace zoneapi --dry-run=client -o yaml | kubectl apply -f -
     
+    - name: Test database connection first
+      run: |
+        echo "=== Testing database connection before deployment ==="
+        
+        # Deploy just the connection test
+        helm template zoneapi ./charts/zoneapi \
+          --namespace zoneapi \
+          --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
+          --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
+          --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
+          --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
+          --set debug.enabled=true \
+          --show-only templates/test-connection-pod.yaml | kubectl apply -f -
+        
+        # Wait for the test pod to complete
+        echo "Waiting for connection test to complete..."
+        kubectl wait --for=condition=Ready pod/zoneapi-test-connection --namespace=zoneapi --timeout=120s || echo "Test pod not ready"
+        
+        # Get the logs
+        echo "=== Connection Test Results ==="
+        kubectl logs zoneapi-test-connection --namespace=zoneapi --follow=false || echo "Could not get test logs"
+        
+        # Check if test passed
+        if kubectl logs zoneapi-test-connection --namespace=zoneapi | grep -q "All connection tests passed"; then
+          echo "✅ Database connection test PASSED - proceeding with deployment"
+        else
+          echo "❌ Database connection test FAILED - stopping deployment"
+          exit 1
+        fi
+        
+        # Clean up test pod
+        kubectl delete pod zoneapi-test-connection --namespace=zoneapi || echo "Test pod already deleted"
 
-    
     - name: Deploy application with Helm
       run: |
         echo "=== Deploying ZoneAPI with debug enabled ==="
@@ -258,12 +289,12 @@ jobs:
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
           --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
           --set debug.enabled=true \
-          --set migration.timeout=900 \
+          --set migration.timeout=120 \
           --set ingress.hosts[0].host=zoneapi-${{ github.run_number }}.example.com \
           --set ingress.hosts[0].paths[0].path=/ \
           --set ingress.hosts[0].paths[0].pathType=Prefix \
           --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
-          --debug --wait --timeout=20m
+          --debug --wait --timeout=5m
     
     - name: Debug migration job logs
       if: failure()

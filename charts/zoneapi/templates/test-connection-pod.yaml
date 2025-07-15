@@ -1,0 +1,90 @@
+{{- if .Values.debug.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "zoneapi.fullname" . }}-test-connection
+  labels:
+    {{- include "zoneapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test-connection
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-connection
+      image: postgres:15-alpine
+      command:
+        - /bin/bash
+        - -c
+        - |
+          echo "=== Database Connection Test ==="
+          echo "Testing connection to PostgreSQL database..."
+          echo ""
+          echo "Configuration:"
+          echo "  Host: {{ .Values.database.host }}"
+          echo "  Port: {{ .Values.database.port }}"
+          echo "  Database: {{ .Values.database.name }}"
+          echo "  User: {{ .Values.database.user }}"
+          echo ""
+          
+          export PGPASSWORD="$DB_PASSWORD"
+          
+          echo "Step 1: Testing DNS resolution..."
+          nslookup {{ .Values.database.host }} || echo "DNS resolution failed"
+          echo ""
+          
+          echo "Step 2: Testing network connectivity..."
+          nc -zv {{ .Values.database.host }} {{ .Values.database.port }} || echo "Network connection failed"
+          echo ""
+          
+          echo "Step 3: Testing PostgreSQL service..."
+          pg_isready -h {{ .Values.database.host }} -p {{ .Values.database.port }} -U {{ .Values.database.user }}
+          if [ $? -eq 0 ]; then
+            echo "✅ PostgreSQL service is ready"
+          else
+            echo "❌ PostgreSQL service is not ready"
+            exit 1
+          fi
+          echo ""
+          
+          echo "Step 4: Testing authentication..."
+          psql -h {{ .Values.database.host }} -p {{ .Values.database.port }} -U {{ .Values.database.user }} -d postgres -c "SELECT version();"
+          if [ $? -eq 0 ]; then
+            echo "✅ Authentication successful"
+          else
+            echo "❌ Authentication failed"
+            exit 1
+          fi
+          echo ""
+          
+          echo "Step 5: Testing target database access..."
+          psql -h {{ .Values.database.host }} -p {{ .Values.database.port }} -U {{ .Values.database.user }} -d {{ .Values.database.name }} -c "SELECT current_database();"
+          if [ $? -eq 0 ]; then
+            echo "✅ Target database '{{ .Values.database.name }}' accessible"
+          else
+            echo "❌ Target database '{{ .Values.database.name }}' not accessible"
+            echo "Attempting to create database..."
+            psql -h {{ .Values.database.host }} -p {{ .Values.database.port }} -U {{ .Values.database.user }} -d postgres -c "CREATE DATABASE {{ .Values.database.name }};" || echo "Failed to create database"
+          fi
+          echo ""
+          
+          echo "Step 6: Testing connection string format..."
+          CONNECTION_STRING="Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;Command Timeout=300;"
+          echo "Connection string format: Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=***;Command Timeout=300;"
+          echo ""
+          
+          echo "🎉 All connection tests passed!"
+          echo "Database is ready for migrations."
+          
+          # Keep pod running for 60 seconds so we can check logs
+          echo "Keeping pod alive for 60 seconds for log inspection..."
+          sleep 60
+      env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "zoneapi.fullname" . }}-db-secret
+              key: password
+{{- end }} 

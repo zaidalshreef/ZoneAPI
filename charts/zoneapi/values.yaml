@@ -102,7 +102,7 @@ debug:
 
 # Migration configuration
 migration:
-  timeout: 900  # 15 minutes
+  timeout: 120  # 2 minutes
   backoffLimit: 3
 
 # Monitoring and observability
