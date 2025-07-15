@@ -88,13 +88,17 @@ database:
 healthCheck:
   enabled: true
   path: /health
-  initialDelaySeconds: 15
-  periodSeconds: 5
-  timeoutSeconds: 3
-  failureThreshold: 3
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
 
 # Environment configuration
 environment: "Production"
+
+# Debug configuration
+debug:
+  enabled: false
 
 # Monitoring and observability
 monitoring:

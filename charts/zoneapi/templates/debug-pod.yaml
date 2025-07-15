@@ -1,0 +1,55 @@
+{{- if .Values.debug.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "zoneapi.fullname" . }}-debug
+  labels:
+    {{- include "zoneapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: debug
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: debug
+      image: postgres:15-alpine
+      command:
+        - /bin/bash
+        - -c
+        - |
+          echo "=== Database Connection Debug ==="
+          echo "Host: $DB_HOST"
+          echo "Port: $DB_PORT"
+          echo "Database: $DB_NAME"
+          echo "User: $DB_USER"
+          echo ""
+          echo "Testing PostgreSQL connectivity..."
+          pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER
+          echo ""
+          echo "Testing database connection..."
+          psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "\l"
+          echo ""
+          echo "Checking if migrations table exists..."
+          psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "\dt" | grep -i migration || echo "No migration tables found"
+          echo ""
+          echo "Testing ZoneAPI application image connectivity..."
+          # Test connection string format
+          echo "Connection string format: Host=$DB_HOST;Port=$DB_PORT;Database=$DB_NAME;Username=$DB_USER;Password=***;Command Timeout=300;"
+          sleep 30
+      env:
+        - name: DB_HOST
+          value: {{ .Values.database.host | quote }}
+        - name: DB_PORT
+          value: {{ .Values.database.port | quote }}
+        - name: DB_NAME
+          value: {{ .Values.database.name | quote }}
+        - name: DB_USER
+          value: {{ .Values.database.user | quote }}
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "zoneapi.fullname" . }}-db-secret
+              key: password
+{{- end }} 
