@@ -71,10 +71,10 @@ spec:
             httpGet:
               path: {{ .Values.healthCheck.path }}
               port: http
-            initialDelaySeconds: {{ .Values.healthCheck.initialDelaySeconds }}
-            periodSeconds: {{ .Values.healthCheck.periodSeconds }}
-            timeoutSeconds: {{ .Values.healthCheck.timeoutSeconds }}
-            failureThreshold: {{ .Values.healthCheck.failureThreshold }}
+            initialDelaySeconds: 10
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

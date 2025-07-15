@@ -88,9 +88,9 @@ database:
 healthCheck:
   enabled: true
   path: /health
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
+  initialDelaySeconds: 15
+  periodSeconds: 5
+  timeoutSeconds: 3
   failureThreshold: 3
 
 # Environment configuration

@@ -260,8 +260,14 @@ jobs:
           --set ingress.hosts[0].paths[0].path=/ \
           --set ingress.hosts[0].paths[0].pathType=Prefix \
           --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
-          --wait --timeout=10m
+          --debug --wait --timeout=5m
     
+    - name: Check deployment status
+      run: |
+        echo "=== Checking deployment progress ==="
+        kubectl get pods --namespace=zoneapi -o wide
+        kubectl get events --namespace=zoneapi --sort-by='.lastTimestamp' | tail -10
+        
     - name: Verify deployment
       run: |
         kubectl get pods --namespace=zoneapi
