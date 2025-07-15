@@ -229,7 +229,15 @@ jobs:
       run: |
         echo "=== Setting up ACR authentication ==="
         
-        # Initialize Terraform first
+        # Setup Terraform backend first (since this is a separate job)
+        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
+          echo "Setting up Terraform backend..."
+          ./scripts/setup-terraform-backend.sh
+        else
+          echo "Terraform backend already exists"
+        fi
+        
+        # Initialize Terraform with backend
         cd terraform
         terraform init
         
@@ -259,7 +267,16 @@ jobs:
     - name: Get ACR login server from Terraform
       id: acr-info
       run: |
+        # Setup Terraform backend (since this is a separate job)
+        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
+          echo "Setting up Terraform backend..."
+          ./scripts/setup-terraform-backend.sh
+        else
+          echo "Terraform backend already exists"
+        fi
+        
         cd terraform
+        # Initialize Terraform with backend
         terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
         echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
