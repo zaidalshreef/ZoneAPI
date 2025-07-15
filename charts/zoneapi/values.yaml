@@ -98,7 +98,12 @@ environment: "Production"
 
 # Debug configuration
 debug:
-  enabled: false
+  enabled: true
+
+# Migration configuration
+migration:
+  timeout: 900  # 15 minutes
+  backoffLimit: 3
 
 # Monitoring and observability
 monitoring:

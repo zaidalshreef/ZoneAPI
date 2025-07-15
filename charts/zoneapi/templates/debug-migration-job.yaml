@@ -1,0 +1,85 @@
+{{- if .Values.debug.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "zoneapi.fullname" . }}-debug-migration
+  labels:
+    {{- include "zoneapi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: debug-migration
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "zoneapi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: debug-migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: debug-migration
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "=== Debug Migration Job ==="
+              echo "Image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              echo "Database Host: {{ .Values.database.host }}"
+              echo "Database Port: {{ .Values.database.port }}"
+              echo "Database Name: {{ .Values.database.name }}"
+              echo "Database User: {{ .Values.database.user }}"
+              echo ""
+              
+              echo "=== Checking if efbundle exists ==="
+              ls -la /app/efbundle || echo "efbundle not found"
+              file /app/efbundle || echo "Could not determine file type"
+              echo ""
+              
+              echo "=== Testing database connectivity with psql ==="
+              # Install psql for testing
+              apt-get update && apt-get install -y postgresql-client
+              
+              export PGPASSWORD="$DB_PASSWORD"
+              echo "Testing pg_isready..."
+              pg_isready -h {{ .Values.database.host }} -p {{ .Values.database.port }} -U {{ .Values.database.user }}
+              
+              echo "Testing database connection..."
+              psql -h {{ .Values.database.host }} -p {{ .Values.database.port }} -U {{ .Values.database.user }} -d {{ .Values.database.name }} -c "SELECT version();" || echo "Failed to connect to database"
+              
+              echo ""
+              echo "=== Testing efbundle with dry-run ==="
+              echo "Connection string: Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=***;Command Timeout=300;"
+              
+              # Test efbundle execution
+              echo "Running efbundle..."
+              chmod +x /app/efbundle
+              /app/efbundle --connection "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;Command Timeout=300;" --verbose || echo "efbundle failed"
+              
+              echo ""
+              echo "=== Debug completed ==="
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: DOTNET_BUNDLE_EXTRACT_BASE_DIR
+              value: "/tmp"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "zoneapi.fullname" . }}-db-secret
+                  key: password
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }} 

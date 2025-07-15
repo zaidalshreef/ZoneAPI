@@ -10,8 +10,8 @@ metadata:
     "helm.sh/hook-weight": "-1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
+  backoffLimit: {{ .Values.migration.backoffLimit | default 3 }}
+  activeDeadlineSeconds: {{ .Values.migration.timeout | default 600 }}
   template:
     metadata:
       labels:
@@ -26,12 +26,30 @@ spec:
             - /bin/bash
             - -c
             - |
+              echo "=== Database Readiness Check ==="
               echo "Waiting for PostgreSQL to be ready..."
-              until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do
-                echo "PostgreSQL is not ready yet. Waiting..."
+              echo "Host: $DB_HOST, Port: $DB_PORT, User: $DB_USER"
+              
+              # Wait up to 5 minutes for database
+              for i in {1..60}; do
+                if pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; then
+                  echo "PostgreSQL is ready!"
+                  
+                  # Test actual connection
+                  if psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+                    echo "Database connection successful!"
+                    exit 0
+                  else
+                    echo "PostgreSQL is ready but connection failed. Retrying..."
+                  fi
+                else
+                  echo "PostgreSQL is not ready yet. Attempt $i/60..."
+                fi
                 sleep 5
               done
-              echo "PostgreSQL is ready!"
+              
+              echo "Database readiness check failed after 5 minutes"
+              exit 1
           env:
             - name: DB_HOST
               value: {{ .Values.database.host | quote }}
@@ -48,10 +66,26 @@ spec:
         - name: migration
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["/app/efbundle"]
-          args: 
-            - "--connection"
-            - "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);Command Timeout=300;"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "=== Database Migration ==="
+              echo "Starting EF Core migration..."
+              echo "Connection string: Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=***;Command Timeout=300;"
+              
+              # Ensure efbundle is executable
+              chmod +x /app/efbundle
+              
+              # Run migration with detailed output
+              /app/efbundle --connection "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;Command Timeout=300;" --verbose
+              
+              if [ $? -eq 0 ]; then
+                echo "Migration completed successfully!"
+              else
+                echo "Migration failed!"
+                exit 1
+              fi
           env:
             - name: ASPNETCORE_ENVIRONMENT
               value: {{ .Values.environment | quote }}

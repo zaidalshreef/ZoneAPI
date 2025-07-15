@@ -250,17 +250,35 @@ jobs:
     
     - name: Deploy application with Helm
       run: |
+        echo "=== Deploying ZoneAPI with debug enabled ==="
         helm upgrade --install zoneapi ./charts/zoneapi \
           --namespace zoneapi \
           --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
           --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
           --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
+          --set debug.enabled=true \
+          --set migration.timeout=900 \
           --set ingress.hosts[0].host=zoneapi-${{ github.run_number }}.example.com \
           --set ingress.hosts[0].paths[0].path=/ \
           --set ingress.hosts[0].paths[0].pathType=Prefix \
           --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
-          --debug --wait --timeout=5m
+          --debug --wait --timeout=20m
+    
+    - name: Debug migration job logs
+      if: failure()
+      run: |
+        echo "=== Checking migration job status ==="
+        kubectl get jobs --namespace=zoneapi -l app.kubernetes.io/component=migration
+        
+        echo "=== Migration job logs ==="
+        kubectl logs --namespace=zoneapi -l app.kubernetes.io/component=migration --tail=100 || echo "No migration logs found"
+        
+        echo "=== Debug migration job logs ==="
+        kubectl logs --namespace=zoneapi -l app.kubernetes.io/component=debug-migration --tail=100 || echo "No debug migration logs found"
+        
+        echo "=== Recent events ==="
+        kubectl get events --namespace=zoneapi --sort-by='.lastTimestamp' | tail -20
     
     - name: Check deployment status
       run: |
