@@ -16,13 +16,148 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}=== ZoneAPI Database Migration Runner (efbundle) ===${NC}"
 echo "Namespace: $NAMESPACE"
 echo "Timeout: $TIMEOUT seconds"
 echo "Image Tag: $IMAGE_TAG"
+echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo ""
+
+# Enhanced logging function
+log_with_timestamp() {
+  local level="$1"
+  local message="$2"
+  local timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+  case $level in
+  "INFO")
+    echo -e "${BLUE}[$timestamp] INFO:${NC} $message"
+    ;;
+  "SUCCESS")
+    echo -e "${GREEN}[$timestamp] SUCCESS:${NC} $message"
+    ;;
+  "WARNING")
+    echo -e "${YELLOW}[$timestamp] WARNING:${NC} $message"
+    ;;
+  "ERROR")
+    echo -e "${RED}[$timestamp] ERROR:${NC} $message"
+    ;;
+  "DEBUG")
+    echo -e "${PURPLE}[$timestamp] DEBUG:${NC} $message"
+    ;;
+  *)
+    echo -e "[$timestamp] $message"
+    ;;
+  esac
+}
+
+# Function to monitor migration job in real-time
+monitor_migration_realtime() {
+  local job_name="$1"
+  local timeout="$2"
+  local counter=0
+  local last_status=""
+
+  log_with_timestamp "INFO" "Starting real-time monitoring of migration job: $job_name"
+
+  while [ $counter -lt $timeout ]; do
+    # Get job status
+    local status=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "NotFound")
+
+    # Get pod status and count
+    local pod_count=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job_name" --no-headers 2>/dev/null | wc -l)
+    local running_pods=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job_name" --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+    local succeeded_pods=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job_name" --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l)
+    local failed_pods=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job_name" --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l)
+
+    # Show status if it changed
+    if [ "$status" != "$last_status" ]; then
+      log_with_timestamp "INFO" "Job status changed: $last_status -> $status"
+      log_with_timestamp "DEBUG" "Pods - Total: $pod_count, Running: $running_pods, Succeeded: $succeeded_pods, Failed: $failed_pods"
+      last_status="$status"
+    fi
+
+    case $status in
+    "Complete")
+      log_with_timestamp "SUCCESS" "Migration completed successfully after $counter seconds"
+
+      # Show final logs
+      echo -e "\n${GREEN}=== FINAL MIGRATION LOGS ===${NC}"
+      kubectl logs -l job-name="$job_name" -n "$NAMESPACE" --tail=100 || log_with_timestamp "WARNING" "Could not retrieve final logs"
+
+      return 0
+      ;;
+    "Failed")
+      log_with_timestamp "ERROR" "Migration failed after $counter seconds"
+
+      # Show detailed failure information
+      echo -e "\n${RED}=== FAILURE ANALYSIS ===${NC}"
+      log_with_timestamp "ERROR" "Job Description:"
+      kubectl describe job "$job_name" -n "$NAMESPACE"
+
+      log_with_timestamp "ERROR" "Failed Pod Logs:"
+      local failed_pod_list=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job_name" --field-selector=status.phase=Failed -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+
+      if [ -n "$failed_pod_list" ]; then
+        for pod in $failed_pod_list; do
+          echo -e "${RED}--- Logs for failed pod: $pod ---${NC}"
+          kubectl logs "$pod" -n "$NAMESPACE" || log_with_timestamp "ERROR" "Could not retrieve logs for $pod"
+          echo ""
+        done
+      else
+        log_with_timestamp "WARNING" "No failed pods found to analyze"
+      fi
+
+      # Show recent events
+      echo -e "\n${RED}=== RECENT EVENTS ===${NC}"
+      kubectl get events -n "$NAMESPACE" --field-selector involvedObject.kind=Job,involvedObject.name="$job_name" --sort-by='.lastTimestamp' | tail -10
+
+      return 1
+      ;;
+    "NotFound")
+      log_with_timestamp "ERROR" "Migration job not found: $job_name"
+      return 1
+      ;;
+    *)
+      # Job is still running, show periodic updates
+      if [ $((counter % 30)) -eq 0 ]; then # Every 30 seconds
+        log_with_timestamp "INFO" "Migration in progress... (${counter}s/${timeout}s) - Status: $status"
+        log_with_timestamp "DEBUG" "Pods - Running: $running_pods, Succeeded: $succeeded_pods, Failed: $failed_pods"
+
+        # Show recent logs if pods are running
+        if [ "$running_pods" -gt 0 ]; then
+          echo -e "${PURPLE}--- Recent Migration Logs (last 10 lines) ---${NC}"
+          kubectl logs -l job-name="$job_name" -n "$NAMESPACE" --tail=10 --since=30s 2>/dev/null || echo "No recent logs available"
+          echo ""
+        fi
+      else
+        echo -n "."
+      fi
+
+      sleep 5
+      counter=$((counter + 5))
+      ;;
+    esac
+  done
+
+  log_with_timestamp "ERROR" "Migration timed out after ${timeout} seconds"
+
+  # Show final state on timeout
+  echo -e "\n${YELLOW}=== TIMEOUT ANALYSIS ===${NC}"
+  log_with_timestamp "WARNING" "Final job status: $status"
+  log_with_timestamp "WARNING" "Final pod counts - Total: $pod_count, Running: $running_pods, Succeeded: $succeeded_pods, Failed: $failed_pods"
+
+  # Show logs from any running pods
+  if [ "$running_pods" -gt 0 ]; then
+    echo -e "${YELLOW}--- Logs from running pods ---${NC}"
+    kubectl logs -l job-name="$job_name" -n "$NAMESPACE" --tail=50 || log_with_timestamp "WARNING" "Could not retrieve timeout logs"
+  fi
+
+  return 1
+}
 
 # Function to check if migration job exists
 check_migration_job() {
@@ -34,45 +169,16 @@ check_migration_job() {
 wait_for_migration() {
   local job_name="$1"
   local timeout="$2"
-  local counter=0
 
-  echo -e "${BLUE}Waiting for migration job to complete...${NC}"
+  log_with_timestamp "INFO" "Waiting for migration job '$job_name' to complete (timeout: ${timeout}s)"
 
-  while [ $counter -lt $timeout ]; do
-    local status=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "NotFound")
-
-    case $status in
-    "Complete")
-      echo -e "${GREEN}✅ Migration completed successfully${NC}"
-      return 0
-      ;;
-    "Failed")
-      echo -e "${RED}❌ Migration failed${NC}"
-      echo -e "${YELLOW}Job Status:${NC}"
-      kubectl describe job "$job_name" -n "$NAMESPACE"
-      echo -e "${YELLOW}Pod Logs:${NC}"
-      kubectl logs -l job-name="$job_name" -n "$NAMESPACE" --tail=50
-      return 1
-      ;;
-    "NotFound")
-      echo -e "${RED}❌ Migration job not found${NC}"
-      return 1
-      ;;
-    *)
-      echo -n "."
-      sleep 5
-      counter=$((counter + 5))
-      ;;
-    esac
-  done
-
-  echo -e "${RED}❌ Migration timed out after ${timeout} seconds${NC}"
-  return 1
+  # Use enhanced real-time monitoring
+  monitor_migration_realtime "$job_name" "$timeout"
 }
 
 # Function to run migration using Helm
 run_migration_with_helm() {
-  echo -e "${BLUE}=== Running Migration with Helm (efbundle approach) ===${NC}"
+  log_with_timestamp "INFO" "Starting migration with Helm (efbundle approach)"
 
   # Generate unique migration job name with timestamp
   local timestamp=$(date +%s)
@@ -84,15 +190,22 @@ run_migration_with_helm() {
   local db_password="${DB_PASSWORD:-}"
 
   if [ -z "$acr_login_server" ] || [ -z "$database_host" ] || [ -z "$db_password" ]; then
-    echo -e "${RED}❌ Missing required environment variables:${NC}"
-    echo "ACR_LOGIN_SERVER: $acr_login_server"
-    echo "DATABASE_HOST: $database_host"
-    echo "DB_PASSWORD: [REDACTED]"
+    log_with_timestamp "ERROR" "Missing required environment variables"
+    echo "ACR_LOGIN_SERVER: ${acr_login_server:-[MISSING]}"
+    echo "DATABASE_HOST: ${database_host:-[MISSING]}"
+    echo "DB_PASSWORD: ${db_password:+[PROVIDED]}"
     return 1
   fi
 
+  log_with_timestamp "INFO" "Migration configuration validated"
+  log_with_timestamp "DEBUG" "ACR Server: $acr_login_server"
+  log_with_timestamp "DEBUG" "Database Host: $database_host"
+  log_with_timestamp "DEBUG" "Image Tag: $IMAGE_TAG"
+
   # Deploy migration job using Helm
-  helm template zoneapi-migration ./charts/zoneapi \
+  log_with_timestamp "INFO" "Deploying migration job via Helm template"
+
+  if helm template zoneapi-migration ./charts/zoneapi \
     --set migration.enabled=true \
     --set image.repository="$acr_login_server/zoneapi" \
     --set image.tag="$IMAGE_TAG" \
@@ -100,19 +213,47 @@ run_migration_with_helm() {
     --set database.password="$db_password" \
     --include-crds \
     --show-only templates/migration-job.yaml |
-    kubectl apply -f - -n "$NAMESPACE"
-
-  # Extract job name from the applied template
-  local actual_job_name=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null)
-
-  if [ -z "$actual_job_name" ]; then
-    echo -e "${RED}❌ Failed to create migration job${NC}"
+    kubectl apply -f - -n "$NAMESPACE"; then
+    log_with_timestamp "SUCCESS" "Migration job template applied successfully"
+  else
+    log_with_timestamp "ERROR" "Failed to apply migration job template"
     return 1
   fi
 
-  echo -e "${GREEN}✅ Migration job created: $actual_job_name${NC}"
+  # Wait for job to be created and get its name
+  log_with_timestamp "INFO" "Waiting for migration job to be created..."
+  local retries=0
+  local max_retries=12 # 1 minute with 5-second intervals
+  local actual_job_name=""
 
-  # Wait for migration completion
+  while [ $retries -lt $max_retries ]; do
+    actual_job_name=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -n "$actual_job_name" ]; then
+      log_with_timestamp "SUCCESS" "Migration job created: $actual_job_name"
+      break
+    fi
+
+    log_with_timestamp "DEBUG" "Waiting for job creation... (attempt $((retries + 1))/$max_retries)"
+    sleep 5
+    retries=$((retries + 1))
+  done
+
+  if [ -z "$actual_job_name" ]; then
+    log_with_timestamp "ERROR" "Failed to create or find migration job after $max_retries attempts"
+
+    # Show debugging information
+    echo -e "\n${RED}=== JOB CREATION DEBUGGING ===${NC}"
+    log_with_timestamp "DEBUG" "All jobs in namespace:"
+    kubectl get jobs -n "$NAMESPACE" -o wide
+
+    log_with_timestamp "DEBUG" "Recent events:"
+    kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' | tail -10
+
+    return 1
+  fi
+
+  # Wait for migration completion with enhanced monitoring
   wait_for_migration "$actual_job_name" "$TIMEOUT"
 }
 
