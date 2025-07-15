@@ -124,7 +124,7 @@ restartPolicy: Always
 terminationGracePeriodSeconds: 10  # Faster shutdown
 
 # Environment configuration
-environment: "Production"
+environment: "Development"
 
 # Debug configuration
 debug:

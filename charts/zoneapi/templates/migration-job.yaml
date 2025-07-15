@@ -72,13 +72,13 @@ spec:
             - |
               echo "=== Database Migration ==="
               echo "Starting EF Core migration..."
-              echo "Connection string: Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=***;Command Timeout=300;"
+              echo "Connection string: Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=***;CommandTimeout=300;Timeout=60;"
               
               # Ensure efbundle is executable
               chmod +x /app/efbundle
               
-              # Run migration with detailed output
-              /app/efbundle --connection "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;Command Timeout=300;" --verbose
+              # Run migration with detailed output (matching docker-compose format exactly)
+              /app/efbundle --connection "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;CommandTimeout=300;Timeout=60;" --verbose
               
               if [ $? -eq 0 ]; then
                 echo "Migration completed successfully!"
