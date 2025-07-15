@@ -246,6 +246,12 @@ jobs:
       run: |
         kubectl create namespace zoneapi --dry-run=client -o yaml | kubectl apply -f -
     
+    - name: Create source code ConfigMap
+      run: |
+        kubectl create configmap migration-source-${{ github.run_number }} \
+          --from-file=ZoneAPI/ \
+          --namespace=zoneapi
+
     - name: Run database migrations
       run: |
         cat <<EOF | kubectl apply -f -
@@ -272,15 +278,20 @@ jobs:
                   value: "${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
               containers:
               - name: migration
-                image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
+                image: mcr.microsoft.com/dotnet/sdk:7.0
                 command: ["sh", "-c"]
                 args: 
                 - |
+                  echo "Installing EF Core tools..."
+                  dotnet tool install --global dotnet-ef --version 7.0.4
                   export PATH="$PATH:/root/.dotnet/tools"
                   cd /app
                   echo "Starting database migration..."
                   dotnet ef database update --verbose --project ZoneAPI.csproj
                 workingDir: /app
+                volumeMounts:
+                - name: source-code
+                  mountPath: /app
                 env:
                 - name: ASPNETCORE_ENVIRONMENT
                   value: "Production"
@@ -288,13 +299,21 @@ jobs:
                   value: "Production"
                 - name: ConnectionStrings__PostgreSQLConnection
                   value: "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};CommandTimeout=300;Timeout=60;"
+              volumes:
+              - name: source-code
+                configMap:
+                  name: migration-source-${{ github.run_number }}
               restartPolicy: Never
           backoffLimit: 3
         EOF
         
         kubectl wait --for=condition=complete job/migration-job-${{ github.run_number }} --namespace=zoneapi --timeout=600s
         kubectl logs job/migration-job-${{ github.run_number }} --namespace=zoneapi
+        
+    - name: Cleanup migration resources
+      run: |
         kubectl delete job migration-job-${{ github.run_number }} --namespace=zoneapi
+        kubectl delete configmap migration-source-${{ github.run_number }} --namespace=zoneapi
     
     - name: Deploy application with Helm
       run: |
