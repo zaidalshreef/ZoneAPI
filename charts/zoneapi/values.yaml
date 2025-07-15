@@ -23,15 +23,15 @@ serviceAccount:
 podAnnotations: {}
 
 podSecurityContext:
-  fsGroup: 2000
+  fsGroup: 10001  # Match Dockerfile user
 
 securityContext:
   capabilities:
     drop:
     - ALL
-  readOnlyRootFilesystem: true
+  readOnlyRootFilesystem: false  # Allow writes to /tmp for migrations
   runAsNonRoot: true
-  runAsUser: 1000
+  runAsUser: 10001  # Match Dockerfile UID
 
 service:
   type: ClusterIP
@@ -84,32 +84,34 @@ database:
   user: "postgres"
   password: ""  # Will be set by CI/CD via secret
 
-# Health check configuration
+# Health check configuration - Updated for .NET 7.0 container
 healthCheck:
   enabled: true
   path: /health
-  initialDelaySeconds: 15  # Give app time to start
-  periodSeconds: 5
-  timeoutSeconds: 3  # Reduced from 5
-  failureThreshold: 3  # Max 3 failures before restart
+  initialDelaySeconds: 20  # Slightly more time for .NET 7.0 startup
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
   successThreshold: 1
 
-# Liveness probe (when to restart container)
+# Liveness probe (when to restart container) - Updated for stability
 livenessProbe:
   enabled: true
-  initialDelaySeconds: 60  # Wait much longer before first check
+  path: /health
+  initialDelaySeconds: 60  # Give app sufficient time to start
   periodSeconds: 30
   timeoutSeconds: 10
-  failureThreshold: 10  # Very forgiving
+  failureThreshold: 5  # Be more forgiving during startup
   successThreshold: 1
 
-# Readiness probe (when to start receiving traffic)
+# Readiness probe (when to start receiving traffic) - Updated for .NET 7.0
 readinessProbe:
   enabled: true
-  initialDelaySeconds: 30  # Give more time to start
+  path: /health
+  initialDelaySeconds: 30  # Allow proper startup time
   periodSeconds: 10
   timeoutSeconds: 10
-  failureThreshold: 10  # Very forgiving
+  failureThreshold: 3  # Reasonable failure threshold
   successThreshold: 1
 
 # Deployment strategy
@@ -130,12 +132,13 @@ environment: "Development"
 debug:
   enabled: true
 
-# Migration configuration
+# Migration configuration - Updated for efbundle approach
 migration:
-  enabled: true  # ENABLED - using standalone migration job (best practice)
-  timeout: 600  # 10 minutes (reasonable for Azure PostgreSQL connections)
+  enabled: true  # Using standalone migration job with efbundle
+  timeout: 600  # 10 minutes for Azure PostgreSQL
   backoffLimit: 3  # Max 3 retries
   activeDeadlineSeconds: 600  # Kill job after 10 minutes total
+  bundlePath: "/app/efbundle"  # Path to migration bundle in container
 
 # Monitoring and observability
 monitoring:

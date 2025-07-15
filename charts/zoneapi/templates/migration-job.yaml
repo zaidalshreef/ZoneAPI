@@ -6,10 +6,10 @@ metadata:
   labels:
     {{- include "zoneapi.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
-  # REMOVED PRE-INSTALL HOOKS - Using standalone job approach
+  # Using standalone job approach - no pre-install hooks
 spec:
   backoffLimit: {{ .Values.migration.backoffLimit | default 3 }}
-  activeDeadlineSeconds: {{ .Values.migration.timeout | default 900 }}
+  activeDeadlineSeconds: {{ .Values.migration.timeout | default 600 }}
   template:
     metadata:
       labels:
@@ -17,11 +17,14 @@ spec:
         app.kubernetes.io/component: migration
     spec:
       restartPolicy: Never
+      securityContext:
+        fsGroup: 10001  # Match Dockerfile user setup
       containers:
         - name: migration
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["./efbundle"]
+          workingDir: /app  # Set working directory to where efbundle is located
+          command: ["./efbundle"]  # Run efbundle from /app directory
           args: 
             - "--connection"
             - "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;CommandTimeout=300;Timeout=60;"
@@ -37,9 +40,12 @@ spec:
                   name: {{ include "zoneapi.fullname" . }}-db-secret
                   key: password
           securityContext:
+            runAsUser: 0  # Run as root for migration bundle execution
             runAsNonRoot: false
-            runAsUser: 0
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -48,8 +54,8 @@ spec:
               memory: "128Mi"
               cpu: "100m"
             limits:
-              memory: "256Mi"
-              cpu: "250m"
+              memory: "512Mi"  # Increased for migration operations
+              cpu: "500m"      # Increased for migration operations
       volumes:
         - name: tmp
           emptyDir: {}

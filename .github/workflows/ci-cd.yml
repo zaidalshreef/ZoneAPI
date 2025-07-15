@@ -268,22 +268,33 @@ jobs:
         
         echo "✅ Namespace and secrets created"
 
-    - name: Run Database Migration (Standalone Job)
+    - name: Run Database Migration (efbundle Approach)
       timeout-minutes: 15
       run: |
-        echo "=== Running Database Migration (Industry Best Practice) ==="
+        echo "=== Running Database Migration (efbundle Industry Best Practice) ==="
         
-        # Set environment variables
+        # Set environment variables for migration script
         export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
         export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
+        export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
         export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         export NAMESPACE="zoneapi"
         export TIMEOUT="600"
         
+        echo "Migration Configuration:"
+        echo "- ACR: $ACR_LOGIN_SERVER"
+        echo "- Database Host: $DATABASE_HOST"  
+        echo "- Image Tag: $IMAGE_TAG"
+        echo "- Namespace: $NAMESPACE"
+        echo "- Timeout: $TIMEOUT seconds"
+        
+        # Setup Helm
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        
         # Make script executable
         chmod +x ./scripts/run-migration.sh
         
-        # Run migration using standalone script
+        # Run migration using efbundle approach
         ./scripts/run-migration.sh
     
     - name: Verify Migration Success
