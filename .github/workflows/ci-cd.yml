@@ -257,6 +257,9 @@ jobs:
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
           --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
           --set ingress.hosts[0].host=zoneapi-${{ github.run_number }}.example.com \
+          --set ingress.hosts[0].paths[0].path=/ \
+          --set ingress.hosts[0].paths[0].pathType=Prefix \
+          --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
           --wait --timeout=10m
     
     - name: Verify deployment
