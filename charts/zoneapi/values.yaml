@@ -132,10 +132,10 @@ debug:
 
 # Migration configuration
 migration:
-  enabled: false  # DISABLED - skip migration completely
-  timeout: 120  # 2 minutes
+  enabled: true  # ENABLED - using standalone migration job (best practice)
+  timeout: 600  # 10 minutes (reasonable for Azure PostgreSQL connections)
   backoffLimit: 3  # Max 3 retries
-  activeDeadlineSeconds: 180  # Kill job after 3 minutes total
+  activeDeadlineSeconds: 600  # Kill job after 10 minutes total
 
 # Monitoring and observability
 monitoring:

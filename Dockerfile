@@ -1,49 +1,40 @@
-# Multi-stage Dockerfile for ZoneAPI
-# Build stage
-FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build-env
-WORKDIR /app
+# Build Stage
+FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
+WORKDIR /src
 
-# Copy csproj and restore as distinct layers
-COPY ZoneAPI/ZoneAPI.csproj ZoneAPI/
-RUN dotnet restore ZoneAPI/ZoneAPI.csproj
+# Copy project files
+COPY ["ZoneAPI/ZoneAPI.csproj", "ZoneAPI/"]
+RUN dotnet restore "ZoneAPI/ZoneAPI.csproj"
 
 # Copy everything else and build
-COPY ZoneAPI/ ZoneAPI/
-WORKDIR /app/ZoneAPI
-RUN dotnet publish -c Release -o out
+COPY . .
+WORKDIR "/src/ZoneAPI"
+RUN dotnet build "ZoneAPI.csproj" -c Release -o /app/build
 
-# Install EF Core tools globally and create migration bundle
-RUN dotnet tool install --global dotnet-ef --version 7.0.4
+# Publish the application
+FROM build AS publish
+RUN dotnet publish "ZoneAPI.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Generate EF Core Migration Bundle (Industry Best Practice)
+FROM build AS migrations
+RUN dotnet tool install --global dotnet-ef
 ENV PATH="$PATH:/root/.dotnet/tools"
-RUN dotnet ef migrations bundle --self-contained -o /app/efbundle
+RUN dotnet ef migrations bundle --configuration Release --output /app/efbundle --self-contained --target-runtime linux-x64
 
-# Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:7.0
+# Runtime Stage
+FROM mcr.microsoft.com/dotnet/aspnet:7.0 AS final
 WORKDIR /app
-
-# Create non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# Copy published application
-COPY --from=build-env /app/ZoneAPI/out .
-
-# Copy migration bundle
-COPY --from=build-env /app/efbundle /app/efbundle
-RUN chmod +x /app/efbundle
-
-# Change ownership to appuser
-RUN chown -R appuser:appuser /app
-USER appuser
-
-# Expose port
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+# Copy published application
+COPY --from=publish /app/publish .
 
-# Entry point
+# Copy migration bundle
+COPY --from=migrations /app/efbundle .
+
+# Make migration bundle executable
+RUN chmod +x efbundle
+
+# Set non-root user
+USER $APP_UID
 ENTRYPOINT ["dotnet", "ZoneAPI.dll"] 

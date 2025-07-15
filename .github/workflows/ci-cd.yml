@@ -206,7 +206,7 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-  # Migration Job (Separate from deployment)
+# Migration Job (Industry Best Practice - Separate from Deployment)
   run-migration:
     runs-on: ubuntu-latest
     needs: [deploy-infrastructure, docker-build-push]
@@ -220,17 +220,6 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
-    - name: Setup Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: ${{ env.HELM_VERSION }}
-    
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.5.0
-        terraform_wrapper: false
-    
     - name: Get AKS credentials
       run: |
         az aks get-credentials \
@@ -238,61 +227,28 @@ jobs:
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
 
-    - name: Setup ACR authentication for AKS
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
+        terraform_wrapper: false
+    
+    - name: Get Infrastructure Details
+      id: infra
       run: |
-        echo "=== Setting up ACR authentication ==="
-        
-        # Setup Terraform backend first (since this is a separate job)
+        # Setup Terraform backend
         if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
           echo "Setting up Terraform backend..."
           ./scripts/setup-terraform-backend.sh
-        else
-          echo "Terraform backend already exists"
-        fi
-        
-        # Initialize Terraform with backend
-        cd terraform
-        terraform init
-        
-        # Get ACR credentials
-        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
-        ACR_USERNAME=$(terraform output -raw acr_admin_username)
-        ACR_PASSWORD=$(terraform output -raw acr_admin_password)
-        
-        echo "ACR Login Server: $ACR_LOGIN_SERVER"
-        
-        # Create or update image pull secret
-        kubectl create secret docker-registry acr-secret \
-          --docker-server="$ACR_LOGIN_SERVER" \
-          --docker-username="$ACR_USERNAME" \
-          --docker-password="$ACR_PASSWORD" \
-          --namespace=zoneapi \
-          --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Verify the secret was created
-        kubectl get secret acr-secret --namespace=zoneapi
-      env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-
-    - name: Get ACR login server from Terraform
-      id: acr-info
-      run: |
-        # Setup Terraform backend (since this is a separate job)
-        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
-          echo "Setting up Terraform backend..."
-          ./scripts/setup-terraform-backend.sh
-        else
-          echo "Terraform backend already exists"
         fi
         
         cd terraform
-        # Initialize Terraform with backend
         terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
-        echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+        POSTGRES_HOST=$(terraform output -raw postgres_server_fqdn)
+        
+        echo "acr-login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+        echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
@@ -312,85 +268,34 @@ jobs:
         
         echo "✅ Namespace and secrets created"
 
-    - name: Test database connection thoroughly
+    - name: Run Database Migration (Standalone Job)
+      timeout-minutes: 15
       run: |
-        echo "=== DETAILED Database Connection Test ==="
-        echo "Database endpoint: ${{ needs.deploy-infrastructure.outputs.postgres-host }}"
-        echo "Testing from pod inside cluster..."
+        echo "=== Running Database Migration (Industry Best Practice) ==="
         
-        # Create a detailed connection test pod
-        kubectl run zoneapi-db-test \
-          --namespace=zoneapi \
-          --image=postgres:15-alpine \
-          --restart=Never \
-          --rm -i --tty=false \
-          --env="PGPASSWORD=${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
-          --timeout=300s \
-          --command -- /bin/bash -c "
-            echo '=== COMPREHENSIVE Database Connection Test ==='
-            echo 'Host: ${{ needs.deploy-infrastructure.outputs.postgres-host }}'
-            echo 'Port: 5432'
-            echo 'Database: zone'
-            echo 'User: postgres'
-            echo 'Password: [MASKED]'
-            echo ''
-            
-            echo '=== Step 1: DNS Resolution ==='
-            nslookup ${{ needs.deploy-infrastructure.outputs.postgres-host }}
-            
-            echo '=== Step 2: Network Connectivity ==='
-            nc -zv ${{ needs.deploy-infrastructure.outputs.postgres-host }} 5432
-            
-            echo '=== Step 3: PostgreSQL Service Check ==='
-            pg_isready -h ${{ needs.deploy-infrastructure.outputs.postgres-host }} -p 5432 -U postgres -v
-            
-            echo '=== Step 4: Authentication Test ==='
-            psql -h ${{ needs.deploy-infrastructure.outputs.postgres-host }} -p 5432 -U postgres -d postgres -c 'SELECT version();'
-            
-            echo '=== Step 5: Database Zone Test ==='
-            psql -h ${{ needs.deploy-infrastructure.outputs.postgres-host }} -p 5432 -U postgres -d zone -c 'SELECT current_database(), current_user, now();' || echo 'Database zone does not exist yet'
-            
-            echo '=== Step 6: Connection String Test ==='
-            # Test the exact connection string format we use
-            CONNECTION_STRING='Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};CommandTimeout=300;Timeout=60;'
-            echo \"Connection string format: \$CONNECTION_STRING\"
-            
-            echo '✅ All database tests completed'
-          " || (echo "❌ Database connection test failed" && kubectl describe pod zoneapi-db-test -n zoneapi && exit 1)
+        # Set environment variables
+        export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
+        export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
+        export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
+        export NAMESPACE="zoneapi"
+        export TIMEOUT="600"
         
-        echo "✅ Database connection test passed!"
-
-    - name: Run Migration Only (Separate Job)
-      run: |
-        echo "=== RUNNING MIGRATION ONLY ==="
-        echo "Image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}"
+        # Make script executable
+        chmod +x ./scripts/run-migration.sh
         
-        # Deploy only migration job
-        helm upgrade --install zoneapi-migration ./charts/zoneapi \
-          --namespace zoneapi \
-          --set migration.enabled=true \
-          --set replicaCount=0 \
-          --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
-          --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
-          --set imagePullSecrets[0].name=acr-secret \
-          --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
-          --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
-          --wait --timeout=5m \
-          --debug
+        # Run migration using standalone script
+        ./scripts/run-migration.sh
     
-    - name: Check Migration Results
+    - name: Verify Migration Success
       if: always()
       run: |
-        echo "=== MIGRATION JOB STATUS ==="
-        kubectl get jobs -n zoneapi -o wide
+        echo "=== Migration Job Status ==="
+        kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration
         
-        echo "=== MIGRATION JOB LOGS ==="
-        kubectl logs --namespace=zoneapi -l app.kubernetes.io/component=migration --tail=100 || echo "No migration logs found"
-        
-        echo "=== MIGRATION EVENTS ==="
+        echo "=== Migration Events ==="
         kubectl get events --namespace=zoneapi --sort-by='.lastTimestamp' | tail -20
 
-  # Application Deployment Job (Separate from migration)
+  # Application Deployment Job (Completely Separate)
   deploy-application:
     runs-on: ubuntu-latest
     needs: [deploy-infrastructure, docker-build-push, run-migration]
@@ -409,12 +314,6 @@ jobs:
       with:
         version: ${{ env.HELM_VERSION }}
     
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.5.0
-        terraform_wrapper: false
-    
     - name: Get AKS credentials
       run: |
         az aks get-credentials \
@@ -422,19 +321,22 @@ jobs:
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
 
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
+        terraform_wrapper: false
+
     - name: Get ACR login server from Terraform
       id: acr-info
       run: |
-        # Setup Terraform backend (since this is a separate job)
+        # Setup Terraform backend
         if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
           echo "Setting up Terraform backend..."
           ./scripts/setup-terraform-backend.sh
-        else
-          echo "Terraform backend already exists"
         fi
         
         cd terraform
-        # Initialize Terraform with backend
         terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
         echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
@@ -444,14 +346,14 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
     
-    - name: Deploy application with NO HEALTH CHECKS (Debug Mode)
+    - name: Deploy Application (Post-Migration)
       timeout-minutes: 10
       run: |
-        echo "=== DEPLOYING APPLICATION (DEBUG MODE) ==="
+        echo "=== DEPLOYING APPLICATION (POST-MIGRATION) ==="
         echo "Image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}"
         echo "Database: ${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
-        # Deploy with health checks DISABLED for debugging
+        # Deploy application with proper health checks enabled
         helm upgrade --install zoneapi ./charts/zoneapi \
           --namespace zoneapi \
           --set migration.enabled=false \
@@ -460,71 +362,47 @@ jobs:
           --set imagePullSecrets[0].name=acr-secret \
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
           --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
-          --set livenessProbe.enabled=false \
-          --set readinessProbe.enabled=false \
-          --set healthCheck.enabled=false \
+          --set livenessProbe.enabled=true \
+          --set readinessProbe.enabled=true \
           --set replicaCount=1 \
           --wait --timeout=8m \
           --debug
     
-    - name: Detailed Pod Analysis
+    - name: Verify Deployment
       if: always()
       run: |
-        echo "=== DETAILED POD ANALYSIS ==="
+        echo "=== DEPLOYMENT VERIFICATION ==="
         
-        echo "=== Cluster Resources ==="
-        kubectl get nodes -o wide
-        kubectl top nodes || echo "Metrics not available"
-        
-        echo "=== Namespace Resources ==="
-        kubectl get all -n zoneapi -o wide
-        
-        echo "=== Pod Details ==="
+        echo "=== Pods Status ==="
         kubectl get pods -n zoneapi -o wide
-        kubectl describe pods -n zoneapi
         
-        echo "=== Pod Logs ==="
-        for pod in $(kubectl get pods -n zoneapi -o jsonpath='{.items[*].metadata.name}'); do
-          echo "--- Logs for pod: $pod ---"
-          kubectl logs $pod -n zoneapi --tail=100 || echo "No logs for $pod"
-        done
+        echo "=== Services ==="
+        kubectl get services -n zoneapi -o wide
         
         echo "=== Recent Events ==="
-        kubectl get events -n zoneapi --sort-by='.lastTimestamp' | tail -30
+        kubectl get events -n zoneapi --sort-by='.lastTimestamp' | tail -20
         
-        echo "=== Service and Endpoints ==="
-        kubectl get services -n zoneapi -o wide
-        kubectl get endpoints -n zoneapi -o wide
+        echo "=== Pod Logs (if any issues) ==="
+        kubectl logs -l app.kubernetes.io/name=zoneapi -n zoneapi --tail=50 || echo "No pod logs available"
     
-    - name: Manual Health Check Test
-      if: always()
+    - name: Health Check Test
       run: |
-        echo "=== MANUAL HEALTH CHECK TEST ==="
+        echo "=== HEALTH CHECK TEST ==="
         
         # Get pod name
-        pod_name=$(kubectl get pods -n zoneapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        pod_name=$(kubectl get pods -n zoneapi -l app.kubernetes.io/name=zoneapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
         
         if [ -n "$pod_name" ]; then
           echo "Testing pod: $pod_name"
           
-          # Wait for pod to be running
-          kubectl wait --for=condition=ready pod/$pod_name -n zoneapi --timeout=60s || echo "Pod not ready within 60s"
+          # Wait for pod to be ready
+          kubectl wait --for=condition=ready pod/$pod_name -n zoneapi --timeout=120s
           
-          # Test health endpoint directly
+          # Test health endpoint
           echo "Testing health endpoint..."
-          kubectl exec -n zoneapi $pod_name -- curl -v http://localhost:8080/health || echo "Health endpoint failed"
+          kubectl exec -n zoneapi $pod_name -- curl -f http://localhost:8080/health
           
-          # Test root endpoint
-          echo "Testing root endpoint..."
-          kubectl exec -n zoneapi $pod_name -- curl -v http://localhost:8080/ || echo "Root endpoint failed"
-          
-          # Check if app is listening
-          echo "Checking listening ports..."
-          kubectl exec -n zoneapi $pod_name -- netstat -tulpn | grep 8080 || echo "Port 8080 not listening"
-          
-          # Check environment variables
-          echo "Environment variables:"
-          kubectl exec -n zoneapi $pod_name -- env | grep -E "(ASPNETCORE|DB_|ConnectionStrings)" || echo "No relevant env vars"
+          echo "✅ Health check passed!"
         else
-          echo "No pods found to test"
+          echo "⚠️  No pods found to test"
         fi 
