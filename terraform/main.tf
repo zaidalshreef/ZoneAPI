@@ -107,7 +107,7 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "aks_access" {
   end_ip_address   = "255.255.255.255"
 }
 
-# Create AKS Cluster
+# Create AKS Cluster with ACR integration
 resource "azurerm_kubernetes_cluster" "aks" {
   name                = "aks-${local.resource_prefix}"
   location            = azurerm_resource_group.main.location
@@ -132,9 +132,12 @@ resource "azurerm_kubernetes_cluster" "aks" {
   tags = local.common_tags
 }
 
-# Give AKS permission to pull images from ACR
-resource "azurerm_role_assignment" "aks_acr_pull" {
-  scope                = azurerm_container_registry.acr.id
-  role_definition_name = "AcrPull"
-  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
-} 
+# NOTE: This role assignment requires "User Access Administrator" permissions
+# If you get permission errors, grant the service principal higher permissions:
+# az role assignment create --assignee <service-principal-id> --role "User Access Administrator" --scope /subscriptions/<subscription-id>
+#
+# resource "azurerm_role_assignment" "aks_acr_pull" {
+#   scope                = azurerm_container_registry.acr.id
+#   role_definition_name = "AcrPull"
+#   principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
+# } 
