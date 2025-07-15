@@ -246,12 +246,6 @@ jobs:
       run: |
         kubectl create namespace zoneapi --dry-run=client -o yaml | kubectl apply -f -
     
-    - name: Create source code ConfigMap
-      run: |
-        kubectl create configmap migration-source-${{ github.run_number }} \
-          --from-file=ZoneAPI/ \
-          --namespace=zoneapi
-
     - name: Run database migrations
       run: |
         cat <<EOF | kubectl apply -f -
@@ -276,6 +270,24 @@ jobs:
                   value: "postgres"
                 - name: PGPASSWORD
                   value: "${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+              - name: setup-source
+                image: alpine/git
+                command: ['sh', '-c']
+                args:
+                - |
+                  echo "Cloning repository..."
+                  git clone https://github.com/${{ github.repository }}.git /tmp/repo
+                  cd /tmp/repo && git checkout ${{ github.sha }}
+                  echo "Copying source files..."
+                  cp -r /tmp/repo/ZoneAPI/* /app/
+                  ls -la /app/
+                  echo "Source setup complete"
+                volumeMounts:
+                - name: source-volume
+                  mountPath: /app
+                env:
+                - name: GIT_SSL_NO_VERIFY
+                  value: "true"
               containers:
               - name: migration
                 image: mcr.microsoft.com/dotnet/sdk:7.0
@@ -285,12 +297,14 @@ jobs:
                   echo "Installing EF Core tools..."
                   dotnet tool install --global dotnet-ef --version 7.0.4
                   export PATH="$PATH:/root/.dotnet/tools"
-                  cd /app
+                  echo "Current directory contents:"
+                  ls -la /app/
                   echo "Starting database migration..."
+                  cd /app
                   dotnet ef database update --verbose --project ZoneAPI.csproj
                 workingDir: /app
                 volumeMounts:
-                - name: source-code
+                - name: source-volume
                   mountPath: /app
                 env:
                 - name: ASPNETCORE_ENVIRONMENT
@@ -300,20 +314,15 @@ jobs:
                 - name: ConnectionStrings__PostgreSQLConnection
                   value: "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};CommandTimeout=300;Timeout=60;"
               volumes:
-              - name: source-code
-                configMap:
-                  name: migration-source-${{ github.run_number }}
+              - name: source-volume
+                emptyDir: {}
               restartPolicy: Never
           backoffLimit: 3
         EOF
         
         kubectl wait --for=condition=complete job/migration-job-${{ github.run_number }} --namespace=zoneapi --timeout=600s
         kubectl logs job/migration-job-${{ github.run_number }} --namespace=zoneapi
-        
-    - name: Cleanup migration resources
-      run: |
         kubectl delete job migration-job-${{ github.run_number }} --namespace=zoneapi
-        kubectl delete configmap migration-source-${{ github.run_number }} --namespace=zoneapi
     
     - name: Deploy application with Helm
       run: |
