@@ -1,7 +1,7 @@
 # Default values for zoneapi
 # This is a YAML-formatted file.
 
-replicaCount: 3
+replicaCount: 1
 
 image:
   repository: ""  # Will be overridden by CI/CD
@@ -57,16 +57,16 @@ ingress:
 
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
-  requests:
-    cpu: 250m
+    cpu: 200m
     memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
 
 autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 10
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 80
 
