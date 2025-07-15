@@ -50,6 +50,6 @@ spec:
         - name: PGPASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "zoneapi.fullname" . }}-db-secret
+              name: zoneapi-db-secret
               key: password
 {{- end }} 
