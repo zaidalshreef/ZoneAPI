@@ -488,38 +488,36 @@ jobs:
         
         echo "✅ Post-migration database verification completed!"
 
-    - name: 🛠️ Migration Troubleshooting Information
+    - name: 🛠️ Comprehensive Migration Troubleshooting
       if: failure()
       run: |
-        echo "=== 🛠️ MIGRATION TROUBLESHOOTING INFORMATION ==="
+        echo "=== 🛠️ COMPREHENSIVE MIGRATION TROUBLESHOOTING ==="
         
-        echo "=== Cluster Information ==="
-        kubectl cluster-info
+        # Run the comprehensive debug script
+        chmod +x ./scripts/debug-migration-status.sh
+        ./scripts/debug-migration-status.sh zoneapi || echo "Debug script completed with issues"
         
-        echo "=== Node Status ==="
-        kubectl get nodes -o wide
+        echo ""
+        echo "=== 🔍 ADDITIONAL CLUSTER DIAGNOSTICS ==="
         
-        echo "=== Namespace Events ==="
-        kubectl get events -n zoneapi --sort-by='.lastTimestamp' | tail -30
+        echo "=== Resource Usage ==="
+        kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+        kubectl top pods -n zoneapi 2>/dev/null || echo "Pod metrics not available"
         
-        echo "=== All Pods in Namespace ==="
-        kubectl get pods -n zoneapi -o wide
-        
-        echo "=== Secrets ==="
-        kubectl get secrets -n zoneapi
-        
-        echo "=== Network Policies ==="
+        echo "=== Network Diagnostics ==="
         kubectl get networkpolicies -n zoneapi 2>/dev/null || echo "No network policies found"
+        kubectl get ingress -n zoneapi -o wide 2>/dev/null || echo "No ingress found"
         
-        echo "=== Resource Quotas ==="
+        echo "=== Storage Diagnostics ==="
+        kubectl get pv,pvc -n zoneapi 2>/dev/null || echo "No persistent volumes found"
         kubectl describe quota -n zoneapi 2>/dev/null || echo "No resource quotas found"
         
-        echo "=== Persistent Volumes ==="
-        kubectl get pv,pvc -n zoneapi 2>/dev/null || echo "No persistent volumes found"
+        echo "=== Extended Event History ==="
+        kubectl get events -n zoneapi --sort-by='.lastTimestamp' | tail -50
         
-        # Run enhanced diagnostic script
+        # Run additional health checks
         chmod +x ./scripts/debug-health-checks.sh
-        ./scripts/debug-health-checks.sh || echo "Debug script completed with issues"
+        ./scripts/debug-health-checks.sh || echo "Health check script completed with issues"
     
     - name: Verify Migration Success
       if: always()
