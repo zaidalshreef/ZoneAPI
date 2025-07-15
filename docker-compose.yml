@@ -1,0 +1,107 @@
+services:
+  # PostgreSQL Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: zoneapi-db
+    environment:
+      POSTGRES_DB: zone
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zone"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - zoneapi-network
+
+  # Database Migration Service (runs once)
+  migration:
+    image: mcr.microsoft.com/dotnet/sdk:7.0
+    container_name: zoneapi-migration
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__PostgreSQLConnection: "Host=db;Port=5432;Database=zone;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres123};CommandTimeout=300;Timeout=60;"
+    command: ["sh", "-c", "cd /app && dotnet tool install --global dotnet-ef --version 7.0.4 && export PATH=\"$PATH:/root/.dotnet/tools\" && dotnet ef database update --verbose"]
+    restart: "no"
+    volumes:
+      - ./ZoneAPI:/app
+    working_dir: /app
+    networks:
+      - zoneapi-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ZoneAPI Application Service
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: zoneapi-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__PostgreSQLConnection: "Host=db;Port=5432;Database=zone;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres123};CommandTimeout=300;Timeout=60;"
+      Logging__LogLevel__Default: Information
+      Logging__LogLevel__Microsoft: Warning
+      Logging__LogLevel__System: Warning
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - zoneapi-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # pgAdmin for database management (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: zoneapi-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@zoneapi.com
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - zoneapi-network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    profiles:
+      - admin
+
+networks:
+  zoneapi-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local 

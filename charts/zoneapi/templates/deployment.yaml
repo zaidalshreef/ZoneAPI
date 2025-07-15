@@ -35,7 +35,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
               protocol: TCP
           {{- if .Values.healthCheck.enabled }}
           livenessProbe:
@@ -60,6 +60,10 @@ spec:
           env:
             - name: ASPNETCORE_ENVIRONMENT
               value: {{ .Values.environment | quote }}
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+            - name: ConnectionStrings__PostgreSQLConnection
+              value: "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
             - name: DB_HOST
               value: {{ .Values.database.host | quote }}
             - name: DB_PORT

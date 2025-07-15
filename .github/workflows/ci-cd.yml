@@ -259,7 +259,7 @@ jobs:
             spec:
               initContainers:
               - name: wait-for-db
-                image: postgres:13
+                image: postgres:15-alpine
                 command: ['sh', '-c', 'until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do echo "Waiting for database..."; sleep 2; done; echo "Database is ready!"']
                 env:
                 - name: DB_HOST
@@ -273,18 +273,27 @@ jobs:
               containers:
               - name: migration
                 image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}
-                command: ["./efbundle"]
-                args: ["--connection", "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};Command Timeout=300;Connection Timeout=60;"]
+                command: ["sh", "-c"]
+                args: 
+                - |
+                  export PATH="$PATH:/root/.dotnet/tools"
+                  cd /app
+                  echo "Starting database migration..."
+                  dotnet ef database update --verbose --project ZoneAPI.csproj
+                workingDir: /app
                 env:
                 - name: ASPNETCORE_ENVIRONMENT
                   value: "Production"
                 - name: DOTNET_ENVIRONMENT
                   value: "Production"
+                - name: ConnectionStrings__PostgreSQLConnection
+                  value: "Host=${{ needs.deploy-infrastructure.outputs.postgres-host }};Port=5432;Database=zone;Username=postgres;Password=${{ secrets.POSTGRES_ADMIN_PASSWORD }};CommandTimeout=300;Timeout=60;"
               restartPolicy: Never
           backoffLimit: 3
         EOF
         
         kubectl wait --for=condition=complete job/migration-job-${{ github.run_number }} --namespace=zoneapi --timeout=600s
+        kubectl logs job/migration-job-${{ github.run_number }} --namespace=zoneapi
         kubectl delete job migration-job-${{ github.run_number }} --namespace=zoneapi
     
     - name: Deploy application with Helm
@@ -307,7 +316,7 @@ jobs:
     - name: Run health check
       run: |
         kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=zoneapi --namespace=zoneapi --timeout=300s
-        kubectl port-forward svc/zoneapi 8080:80 --namespace=zoneapi &
+        kubectl port-forward svc/zoneapi 8080:8080 --namespace=zoneapi &
         sleep 10
         curl -f http://localhost:8080/health || exit 1
 

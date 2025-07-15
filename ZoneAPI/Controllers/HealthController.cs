@@ -9,36 +9,65 @@ namespace ZoneAPI.Controllers
     public class HealthController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly ILogger<HealthController> _logger;
 
-        public HealthController(ApplicationDbContext context)
+        public HealthController(ApplicationDbContext context, ILogger<HealthController> logger)
         {
             _context = context;
+            _logger = logger;
         }
 
         [HttpGet]
-        public async Task<IActionResult> Get()
+        public async Task<IActionResult> GetHealth()
         {
             try
             {
-                // Check database connectivity
+                // Test database connectivity
                 await _context.Database.CanConnectAsync();
                 
-                return Ok(new
+                // Get database info
+                var doctorCount = await _context.Doctors.CountAsync();
+                var patientCount = await _context.Patients.CountAsync();
+                var appointmentCount = await _context.Appointments.CountAsync();
+                
+                var healthStatus = new
                 {
                     Status = "Healthy",
                     Timestamp = DateTime.UtcNow,
-                    Version = "1.0.0",
-                    Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"
-                });
+                    Database = new
+                    {
+                        Connected = true,
+                        DoctorCount = doctorCount,
+                        PatientCount = patientCount,
+                        AppointmentCount = appointmentCount
+                    },
+                    Application = new
+                    {
+                        Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+                        MachineName = Environment.MachineName,
+                        Version = "1.0.0"
+                    }
+                };
+
+                _logger.LogInformation("Health check successful");
+                return Ok(healthStatus);
             }
             catch (Exception ex)
             {
-                return StatusCode(503, new
+                _logger.LogError(ex, "Health check failed");
+                
+                var unhealthyStatus = new
                 {
                     Status = "Unhealthy",
                     Timestamp = DateTime.UtcNow,
-                    Error = ex.Message
-                });
+                    Error = ex.Message,
+                    Database = new
+                    {
+                        Connected = false
+                    }
+                };
+
+                return StatusCode(503, unhealthyStatus);
             }
         }
     }
