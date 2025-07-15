@@ -77,11 +77,11 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   administrator_password = var.postgres_admin_password
 
   storage_mb = 32768
-  sku_name = "B_Standard_B1ms"
+  sku_name   = "B_Standard_B1ms"
 
   # Enable public network access for AKS connectivity
   public_network_access_enabled = true
-  
+
   # Authentication configuration
   authentication {
     active_directory_auth_enabled = false
