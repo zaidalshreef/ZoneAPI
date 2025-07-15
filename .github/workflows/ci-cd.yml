@@ -228,7 +228,34 @@ jobs:
           --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group }} \
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
-    
+
+    - name: Setup ACR authentication for AKS
+      run: |
+        echo "=== Setting up ACR authentication ==="
+        
+        # Get ACR credentials
+        ACR_LOGIN_SERVER=$(cd terraform && terraform output -raw acr_login_server)
+        ACR_USERNAME=$(cd terraform && terraform output -raw acr_admin_username)
+        ACR_PASSWORD=$(cd terraform && terraform output -raw acr_admin_password)
+        
+        echo "ACR Login Server: $ACR_LOGIN_SERVER"
+        
+        # Create or update image pull secret
+        kubectl create secret docker-registry acr-secret \
+          --docker-server="$ACR_LOGIN_SERVER" \
+          --docker-username="$ACR_USERNAME" \
+          --docker-password="$ACR_PASSWORD" \
+          --namespace=zoneapi \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Verify the secret was created
+        kubectl get secret acr-secret --namespace=zoneapi
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
     - name: Get ACR login server from Terraform
       id: acr-info
       run: |
@@ -299,6 +326,7 @@ jobs:
           --namespace zoneapi \
           --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
           --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
+          --set imagePullSecrets[0].name=acr-secret \
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
           --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
           --set debug.enabled=true \
