@@ -88,10 +88,40 @@ database:
 healthCheck:
   enabled: true
   path: /health
-  initialDelaySeconds: 30
+  initialDelaySeconds: 15  # Give app time to start
+  periodSeconds: 5
+  timeoutSeconds: 3  # Reduced from 5
+  failureThreshold: 3  # Max 3 failures before restart
+  successThreshold: 1
+
+# Liveness probe (when to restart container)
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30  # Wait longer before first check
   periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+# Readiness probe (when to start receiving traffic)
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 10  # Start checking readiness earlier
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+  successThreshold: 1
+
+# Deployment strategy
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0  # Keep at least one pod running
+
+# Restart policy
+restartPolicy: Always
+terminationGracePeriodSeconds: 10  # Faster shutdown
 
 # Environment configuration
 environment: "Production"
@@ -103,7 +133,8 @@ debug:
 # Migration configuration
 migration:
   timeout: 120  # 2 minutes
-  backoffLimit: 3
+  backoffLimit: 3  # Max 3 retries
+  activeDeadlineSeconds: 180  # Kill job after 3 minutes total
 
 # Monitoring and observability
 monitoring:

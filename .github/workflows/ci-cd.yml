@@ -350,23 +350,55 @@ jobs:
         echo "✅ Database connection test passed!"
 
     - name: Deploy application with Helm
+      timeout-minutes: 2
       run: |
-        echo "=== Deploying ZoneAPI with debug enabled ==="
-        helm upgrade --install zoneapi ./charts/zoneapi \
-          --namespace zoneapi \
-          --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
-          --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
-          --set imagePullSecrets[0].name=acr-secret \
-          --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
-          --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
-          --set debug.enabled=true \
-          --set migration.timeout=120 \
-          --set ingress.hosts[0].host=zoneapi-${{ github.run_number }}.example.com \
-          --set ingress.hosts[0].paths[0].path=/ \
-          --set ingress.hosts[0].paths[0].pathType=Prefix \
-          --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
-          --debug --wait --timeout=5m
-    
+        echo "=== Deploying ZoneAPI with retry logic ==="
+        
+        # Retry function with max 3 attempts and 30s timeout
+        deploy_with_retry() {
+          local max_attempts=3
+          local attempt=1
+          
+          while [ $attempt -le $max_attempts ]; do
+            echo "🚀 Deployment attempt $attempt of $max_attempts"
+            
+            if helm upgrade --install zoneapi ./charts/zoneapi \
+              --namespace zoneapi \
+              --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
+              --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
+              --set imagePullSecrets[0].name=acr-secret \
+              --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
+              --set database.password=${{ secrets.POSTGRES_ADMIN_PASSWORD }} \
+              --set debug.enabled=true \
+              --set migration.timeout=120 \
+              --set ingress.hosts[0].host=zoneapi-${{ github.run_number }}.example.com \
+              --set ingress.hosts[0].paths[0].path=/ \
+              --set ingress.hosts[0].paths[0].pathType=Prefix \
+              --set ingress.tls[0].hosts[0]=zoneapi-${{ github.run_number }}.example.com \
+              --wait --timeout=30s \
+              --atomic --create-namespace; then
+              echo "✅ Deployment successful on attempt $attempt"
+              return 0
+            else
+              echo "❌ Deployment failed on attempt $attempt"
+              if [ $attempt -lt $max_attempts ]; then
+                echo "⏳ Waiting 10 seconds before retry..."
+                sleep 10
+                # Clean up failed deployment before retry
+                helm delete zoneapi --namespace zoneapi --ignore-not-found || true
+                kubectl delete pods --all -n zoneapi --force --grace-period=0 || true
+              fi
+              ((attempt++))
+            fi
+          done
+          
+          echo "💥 All deployment attempts failed after $max_attempts tries"
+          return 1
+        }
+        
+        # Execute deployment with retry
+        deploy_with_retry
+
     - name: Debug migration job logs
       if: failure()
       run: |

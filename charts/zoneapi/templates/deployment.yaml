@@ -8,6 +8,13 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  strategy:
+    type: {{ .Values.deploymentStrategy.type }}
+    {{- if eq .Values.deploymentStrategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.deploymentStrategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.deploymentStrategy.rollingUpdate.maxUnavailable }}
+    {{- end }}
   selector:
     matchLabels:
       {{- include "zoneapi.selectorLabels" . | nindent 6 }}
@@ -27,6 +34,7 @@ spec:
       serviceAccountName: {{ include "zoneapi.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -37,23 +45,27 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
-          {{- if .Values.healthCheck.enabled }}
+          {{- if .Values.livenessProbe.enabled }}
           livenessProbe:
             httpGet:
               path: {{ .Values.healthCheck.path }}
               port: http
-            initialDelaySeconds: {{ .Values.healthCheck.initialDelaySeconds }}
-            periodSeconds: {{ .Values.healthCheck.periodSeconds }}
-            timeoutSeconds: {{ .Values.healthCheck.timeoutSeconds }}
-            failureThreshold: {{ .Values.healthCheck.failureThreshold }}
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+            successThreshold: {{ .Values.livenessProbe.successThreshold }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
           readinessProbe:
             httpGet:
               path: {{ .Values.healthCheck.path }}
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 3
-            timeoutSeconds: 2
-            failureThreshold: 2
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+            successThreshold: {{ .Values.readinessProbe.successThreshold }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -63,7 +75,17 @@ spec:
             - name: ASPNETCORE_URLS
               value: "http://+:8080"
             - name: ConnectionStrings__PostgreSQLConnection
-              value: "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);Command Timeout=300;"
+              value: "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
+            - name: Logging__LogLevel__Default
+              value: "Information"
+            - name: Logging__LogLevel__Microsoft
+              value: "Warning"
+            - name: Logging__LogLevel__System
+              value: "Warning"
+            - name: Logging__LogLevel__Microsoft.AspNetCore
+              value: "Warning"
+            - name: DOTNET_BUNDLE_EXTRACT_BASE_DIR
+              value: "/tmp"
             - name: DB_HOST
               value: {{ .Values.database.host | quote }}
             - name: DB_PORT
