@@ -274,6 +274,7 @@ run_migration_with_helm() {
     --namespace "$NAMESPACE" \
     --create-namespace \
     --set migration.enabled=true \
+    --set debug.enabled=false \
     --set image.repository="$acr_login_server/zoneapi" \
     --set image.tag="$image_tag" \
     --set database.host="$database_host" \
@@ -284,6 +285,18 @@ run_migration_with_helm() {
     --set environment="Development" \
     --set image.pullPolicy="IfNotPresent" | kubectl apply -f -; then
     log_with_timestamp "SUCCESS" "Migration job template applied successfully"
+
+    # Give Kubernetes a moment to process the job creation
+    sleep 3
+
+    # Debug: Check what was actually created immediately after
+    log_with_timestamp "DEBUG" "Checking resources created immediately after template application:"
+    kubectl get jobs -n "$NAMESPACE" -o wide 2>/dev/null || echo "No jobs found"
+    kubectl get all -n "$NAMESPACE" -l app.kubernetes.io/component=migration 2>/dev/null || echo "No migration resources found"
+
+    # Also check recent events to see if there are any immediate failures
+    log_with_timestamp "DEBUG" "Recent events after job creation:"
+    kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' | tail -5
   else
     log_with_timestamp "ERROR" "Failed to apply migration job template"
     return 1
@@ -296,7 +309,22 @@ run_migration_with_helm() {
   local actual_job_name=""
 
   while [ $retries -lt $max_retries ]; do
+    # Try multiple approaches to find the job
     actual_job_name=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+
+    # If not found by label, try to find any recent migration job by name pattern
+    if [ -z "$actual_job_name" ]; then
+      actual_job_name=$(kubectl get jobs -n "$NAMESPACE" --no-headers 2>/dev/null | grep "migration-migration-latest" | tail -1 | awk '{print $1}' || echo "")
+    fi
+
+    # Debug: Show all jobs in namespace to see what exists
+    if [ -z "$actual_job_name" ]; then
+      log_with_timestamp "DEBUG" "All jobs in namespace:"
+      kubectl get jobs -n "$NAMESPACE" -o name 2>/dev/null || echo "No jobs found"
+
+      log_with_timestamp "DEBUG" "Jobs with migration component label:"
+      kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration -o name 2>/dev/null || echo "No jobs with migration label found"
+    fi
 
     if [ -n "$actual_job_name" ]; then
       log_with_timestamp "SUCCESS" "Migration job created: $actual_job_name"
