@@ -362,6 +362,9 @@ jobs:
         
         echo "Creating database connection test pod with properly substituted variables..."
         
+        # Clean up any existing test pod first
+        kubectl delete pod zoneapi-test-connection -n zoneapi --ignore-not-found=true
+        
         # Create pod manifest with variables properly substituted
         cat > /tmp/db-test-pod.yaml << EOF
         apiVersion: v1
