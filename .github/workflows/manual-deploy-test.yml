@@ -61,15 +61,31 @@ jobs:
         cd terraform
         terraform init
         
-        # Get outputs
-        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
-        POSTGRES_HOST=$(terraform output -raw postgres_host)
+        # Check if infrastructure is deployed
+        if ! terraform show &>/dev/null; then
+          echo "❌ No Terraform state found - infrastructure may not be deployed"
+          echo "Please run the main CI/CD pipeline first to deploy infrastructure"
+          exit 1
+        fi
+        
+        # Get outputs with error checking
+        if ! ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server 2>/dev/null); then
+          echo "❌ Failed to get ACR login server from Terraform state"
+          terraform output
+          exit 1
+        fi
+        
+        if ! POSTGRES_HOST=$(terraform output -raw postgres_server_fqdn 2>/dev/null); then
+          echo "❌ Failed to get PostgreSQL host from Terraform state"
+          terraform output
+          exit 1
+        fi
         
         echo "acr-registry=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
         echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
         
-        echo "ACR Registry: $ACR_LOGIN_SERVER"
-        echo "PostgreSQL Host: $POSTGRES_HOST"
+        echo "✅ ACR Registry: $ACR_LOGIN_SERVER"
+        echo "✅ PostgreSQL Host: $POSTGRES_HOST"
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
@@ -156,11 +172,20 @@ jobs:
         kubectl wait --for=condition=available --timeout=300s deployment/zoneapi
         
         # Port forward and test health endpoint
+        echo "Starting port-forward to service/zoneapi..."
         kubectl port-forward service/zoneapi 8080:8080 &
         PF_PID=$!
         
-        # Wait for port forward to be ready
-        sleep 5
+        # Wait for port forward to be ready and test connectivity
+        echo "Waiting for port-forward to be established..."
+        for i in {1..10}; do
+          if netstat -ln | grep ":8080 " >/dev/null 2>&1; then
+            echo "✅ Port-forward established"
+            break
+          fi
+          echo "⏳ Waiting for port-forward... ($i/10)"
+          sleep 2
+        done
         
         # Test health endpoint
         MAX_ATTEMPTS=10
@@ -203,9 +228,19 @@ jobs:
         echo "=== RUNNING API TESTS ==="
         
         # Port forward for testing
+        echo "Starting port-forward for API testing..."
         kubectl port-forward service/zoneapi 8080:8080 &
         PF_PID=$!
-        sleep 5
+        
+        # Wait for port forward to be ready
+        for i in {1..10}; do
+          if netstat -ln | grep ":8080 " >/dev/null 2>&1; then
+            echo "✅ Port-forward ready for API testing"
+            break
+          fi
+          echo "⏳ Waiting for port-forward... ($i/10)"
+          sleep 2
+        done
         
         # Test various endpoints
         echo "Testing /health endpoint..."
