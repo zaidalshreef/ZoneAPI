@@ -176,9 +176,85 @@ wait_for_migration() {
   monitor_migration_realtime "$job_name" "$timeout"
 }
 
+# Function to cleanup old migration jobs
+cleanup_old_migrations() {
+  echo -e "${BLUE}=== Cleaning up old migration jobs ===${NC}"
+
+  # Keep only the last 3 migration jobs
+  local old_jobs=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[0:-3].metadata.name}' 2>/dev/null)
+
+  if [ -n "$old_jobs" ]; then
+    echo "Deleting old migration jobs: $old_jobs"
+    echo "$old_jobs" | xargs -r kubectl delete job -n "$NAMESPACE"
+  else
+    echo "No old migration jobs to clean up"
+  fi
+}
+
+# Function to cleanup failed migration jobs before starting new migration
+cleanup_failed_migrations() {
+  echo -e "${YELLOW}=== Cleaning up failed migration jobs ===${NC}"
+
+  # Get all failed migration jobs
+  local failed_jobs=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration -o jsonpath='{.items[?(@.status.conditions[0].type=="Failed")].metadata.name}' 2>/dev/null || echo "")
+
+  if [ -n "$failed_jobs" ]; then
+    log_with_timestamp "INFO" "Found failed migration jobs: $failed_jobs"
+    for job in $failed_jobs; do
+      log_with_timestamp "INFO" "Deleting failed migration job: $job"
+      kubectl delete job "$job" -n "$NAMESPACE" --ignore-not-found=true
+
+      # Also delete associated pods
+      local failed_pods=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+      if [ -n "$failed_pods" ]; then
+        log_with_timestamp "INFO" "Deleting pods for failed job $job: $failed_pods"
+        for pod in $failed_pods; do
+          kubectl delete pod "$pod" -n "$NAMESPACE" --ignore-not-found=true
+        done
+      fi
+    done
+
+    # Wait a moment for cleanup to complete
+    sleep 5
+    log_with_timestamp "SUCCESS" "Failed migration jobs cleanup completed"
+  else
+    log_with_timestamp "INFO" "No failed migration jobs found to clean up"
+  fi
+}
+
+# Function to ensure database secret is updated with correct password
+update_database_secret() {
+  local db_password="$1"
+
+  if [ -z "$db_password" ]; then
+    log_with_timestamp "ERROR" "Database password is required to update secret"
+    return 1
+  fi
+
+  log_with_timestamp "INFO" "Updating database secret with new password"
+
+  # Delete existing secret if it exists
+  kubectl delete secret zoneapi-db-secret -n "$NAMESPACE" --ignore-not-found=true
+
+  # Create new secret with updated password
+  kubectl create secret generic zoneapi-db-secret \
+    --from-literal=password="$db_password" \
+    -n "$NAMESPACE"
+
+  if [ $? -eq 0 ]; then
+    log_with_timestamp "SUCCESS" "Database secret updated successfully"
+  else
+    log_with_timestamp "ERROR" "Failed to update database secret"
+    return 1
+  fi
+}
+
 # Function to run migration using Helm
 run_migration_with_helm() {
   log_with_timestamp "INFO" "Starting migration with Helm (efbundle approach)"
+
+  # Clean up any failed migration jobs first
+  cleanup_failed_migrations
 
   # Generate unique migration job name with timestamp
   local timestamp=$(date +%s)
@@ -196,6 +272,9 @@ run_migration_with_helm() {
     echo "DB_PASSWORD: ${db_password:+[PROVIDED]}"
     return 1
   fi
+
+  # Force update the database secret with the current password
+  update_database_secret "$db_password"
 
   log_with_timestamp "INFO" "Migration configuration validated"
   log_with_timestamp "DEBUG" "ACR Server: $acr_login_server"
@@ -275,21 +354,6 @@ verify_migration() {
   fi
 
   echo -e "${GREEN}✅ Migration verification completed${NC}"
-}
-
-# Function to cleanup old migration jobs
-cleanup_old_migrations() {
-  echo -e "${BLUE}=== Cleaning up old migration jobs ===${NC}"
-
-  # Keep only the last 3 migration jobs
-  local old_jobs=$(kubectl get jobs -n "$NAMESPACE" -l app.kubernetes.io/component=migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[0:-3].metadata.name}' 2>/dev/null)
-
-  if [ -n "$old_jobs" ]; then
-    echo "Deleting old migration jobs: $old_jobs"
-    echo "$old_jobs" | xargs -r kubectl delete job -n "$NAMESPACE"
-  else
-    echo "No old migration jobs to clean up"
-  fi
 }
 
 # Main execution
