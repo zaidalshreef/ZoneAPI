@@ -28,13 +28,18 @@ spec:
           command: ["./efbundle"]  # Run efbundle from /app directory
           args: 
             - "--connection"
-            - "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password={{ .Values.database.password }};CommandTimeout=300;Timeout=60;"
+            - "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
             - "--verbose"
           env:
             - name: ASPNETCORE_ENVIRONMENT
               value: {{ .Values.environment | quote }}
             - name: DOTNET_BUNDLE_EXTRACT_BASE_DIR
               value: "/tmp"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zoneapi-db-secret
+                  key: password
           securityContext:
             runAsUser: 0  # Run as root for migration bundle execution
             runAsNonRoot: false

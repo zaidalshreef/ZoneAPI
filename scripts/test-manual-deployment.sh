@@ -127,6 +127,13 @@ get_configuration() {
             ACR_NAME=$(echo "$ACR_LOGIN_SERVER" | cut -d'.' -f1)
             DB_HOST=$(terraform output -raw postgres_server_fqdn 2>/dev/null || echo "")
             
+            # Get password from connection string
+            CONNECTION_STRING=$(terraform output -raw postgres_connection_string 2>/dev/null || echo "")
+            if [ -n "$CONNECTION_STRING" ]; then
+                DB_PASSWORD=$(echo "$CONNECTION_STRING" | grep -o 'Password=[^;]*' | cut -d'=' -f2)
+                test_log "SUCCESS" "Retrieved database password from Terraform"
+            fi
+            
             test_log "SUCCESS" "Retrieved values from Terraform"
         fi
         cd ..

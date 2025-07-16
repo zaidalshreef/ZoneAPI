@@ -88,7 +88,7 @@ spec:
                   name: zoneapi-db-secret
                   key: password
             - name: ConnectionStrings__PostgreSQLConnection
-              value: "Host=$(DB_HOST);Port=$(DB_PORT);Database=$(DB_NAME);Username=$(DB_USER);Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
+              value: "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
           volumeMounts:
             - name: tmp
               mountPath: /tmp

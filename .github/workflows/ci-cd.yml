@@ -50,6 +50,7 @@ jobs:
       aks-cluster-name: ${{ steps.terraform-output.outputs.aks-cluster-name }}
       resource-group: ${{ steps.terraform-output.outputs.resource-group }}
       postgres-host: ${{ steps.terraform-output.outputs.postgres-host }}
+      acr-login-server: ${{ steps.terraform-output.outputs.acr-login-server }}
     
     steps:
     - uses: actions/checkout@v4
@@ -114,6 +115,7 @@ jobs:
         echo "aks-cluster-name=$(terraform output -raw aks_cluster_name)" >> $GITHUB_OUTPUT
         echo "resource-group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
         echo "postgres-host=$(terraform output -raw postgres_server_fqdn)" >> $GITHUB_OUTPUT
+        echo "acr-login-server=$(terraform output -raw acr_login_server)" >> $GITHUB_OUTPUT
       working-directory: ./terraform
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
@@ -227,49 +229,65 @@ jobs:
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
+    - name: Setup Helm
+      uses: azure/setup-helm@v3
       with:
-        terraform_version: 1.5.0
-        terraform_wrapper: false
-    
-    - name: Get Infrastructure Details
-      id: infra
+        version: ${{ env.HELM_VERSION }}
+
+    - name: 🔐 Create ACR Secret and Namespace Setup
+      timeout-minutes: 2
       run: |
-        # Setup Terraform backend
-        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
-          echo "Setting up Terraform backend..."
-          ./scripts/setup-terraform-backend.sh
-        fi
+        echo "=== 🔐 CREATING NAMESPACE AND ACR SECRET ==="
         
-        cd terraform
-        terraform init
+        # Create namespace if it doesn't exist
+        kubectl create namespace zoneapi --dry-run=client -o yaml | kubectl apply -f -
         
-        echo "=== Terraform Outputs Debug ==="
-        terraform output || echo "Failed to get terraform outputs"
+        # Get ACR credentials
+        ACR_LOGIN_SERVER="${{ needs.deploy-infrastructure.outputs.acr-login-server }}"
         
-        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server 2>/dev/null || echo "")
-        POSTGRES_HOST=$(terraform output -raw postgres_server_fqdn 2>/dev/null || echo "")
-        
-        echo "Retrieved values:"
-        echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER:-[EMPTY]}"
-        echo "POSTGRES_HOST: ${POSTGRES_HOST:-[EMPTY]}"
-        
-        if [ -z "$ACR_LOGIN_SERVER" ] || [ -z "$POSTGRES_HOST" ]; then
-          echo "❌ Failed to retrieve required Terraform outputs"
-          echo "Available outputs:"
-          terraform output -json | jq -r 'keys[]' || echo "No outputs available"
+        if [ -z "$ACR_LOGIN_SERVER" ]; then
+          echo "❌ ACR login server not available"
           exit 1
         fi
         
-        echo "acr-login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
-        echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
-      env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-    
+        echo "ACR Login Server: $ACR_LOGIN_SERVER"
+        
+        # Get ACR credentials for secret creation
+        ACR_USERNAME=$(az acr credential show --name "${ACR_LOGIN_SERVER%%.azurecr.io}" --query username --output tsv)
+        ACR_PASSWORD=$(az acr credential show --name "${ACR_LOGIN_SERVER%%.azurecr.io}" --query passwords[0].value --output tsv)
+        
+        echo "Creating ACR secret in namespace..."
+        kubectl create secret docker-registry acr-secret \
+          --namespace=zoneapi \
+          --docker-server="$ACR_LOGIN_SERVER" \
+          --docker-username="$ACR_USERNAME" \
+          --docker-password="$ACR_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create database secret with correct password from Terraform
+        echo "Creating database secret..."
+        kubectl create secret generic zoneapi-db-secret \
+          --from-literal=password="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+          --namespace=zoneapi \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Verify secrets were created
+        if kubectl get secret acr-secret -n zoneapi >/dev/null 2>&1; then
+          echo "✅ ACR secret created successfully"
+        else
+          echo "❌ Failed to create ACR secret"
+          exit 1
+        fi
+        
+        if kubectl get secret zoneapi-db-secret -n zoneapi >/dev/null 2>&1; then
+          echo "✅ Database secret created successfully"
+        else
+          echo "❌ Failed to create database secret"
+          exit 1
+        fi
+        
+        echo "✅ Namespace and secrets setup completed successfully"
+
     - name: 🧹 Clean Up Old Migration Jobs (Start with Clean Environment)
       timeout-minutes: 3
       run: |
@@ -289,12 +307,12 @@ jobs:
       run: |
         echo "=== 🔧 VALIDATING ENVIRONMENT VARIABLES ==="
         
-        # Set environment variables for testing
-        export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
-        export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
-        export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
-        export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
-        export NAMESPACE="zoneapi"
+        # Get environment variables
+        ACR_LOGIN_SERVER="${{ needs.deploy-infrastructure.outputs.acr-login-server }}"
+        DATABASE_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
+        DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
+        NAMESPACE="zoneapi"
         
         # Validate environment variables
         echo "Required Environment Variables:"
@@ -324,12 +342,13 @@ jobs:
         
         echo "✅ Environment variables validated!"
 
-    - name: 🧪 Test Database Connection from Kubernetes (Fixed)
+    - name: 🧪 Test Database Connection from Kubernetes (Fixed Environment Variables)
       timeout-minutes: 2
       run: |
         echo "=== 🧪 TESTING DATABASE CONNECTION FROM KUBERNETES ==="
         
-        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        # Get environment variables
+        DB_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
         
         # Debug: Show what values we have
@@ -341,8 +360,10 @@ jobs:
           exit 1
         fi
         
-        echo "Creating database connection test..."
-        cat << EOF | kubectl apply -f -
+        echo "Creating database connection test pod with properly substituted variables..."
+        
+        # Create pod manifest with variables properly substituted
+        cat > /tmp/db-test-pod.yaml << EOF
         apiVersion: v1
         kind: Pod
         metadata:
@@ -360,7 +381,7 @@ jobs:
                   name: zoneapi-db-secret
                   key: password
             - name: DB_HOST
-              value: "${DB_HOST}"
+              value: "$DB_HOST"
             command:
             - /bin/sh
             - -c
@@ -393,13 +414,8 @@ jobs:
               echo "✅ Target database 'zone' accessible"
               
               echo ""
-              echo "Step 5: Testing target database access..."
-              psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT current_database();"
-              echo "✅ Target database 'zone' accessible"
-              
-              echo ""
-              echo "Step 6: Testing connection string format..."
-              echo "Connection string format: Host=\$DB_HOST;Port=5432;Database=zone;Username=postgres;***;Command Timeout=300;"
+              echo "Step 5: Testing connection string format..."
+              echo "Connection string format: Host=\$DB_HOST;Port=5432;Database=zone;Username=postgres;***;CommandTimeout=300;"
               
               echo ""
               echo "🎉 All connection tests passed!"
@@ -407,6 +423,9 @@ jobs:
               echo "Keeping pod alive for 60 seconds for log inspection..."
               sleep 60
         EOF
+        
+        # Apply the pod manifest
+        kubectl apply -f /tmp/db-test-pod.yaml
         
         echo "Waiting for test pod to complete..."
         kubectl wait --for=condition=ready pod/zoneapi-test-connection -n zoneapi --timeout=60s || true
@@ -436,13 +455,16 @@ jobs:
           kubectl describe pod zoneapi-test-connection -n zoneapi
           exit 1
         fi
+        
+        # Clean up test pod
+        kubectl delete pod zoneapi-test-connection -n zoneapi --ignore-not-found=true
 
-    - name: 📊 Pre-Migration Database State Check (Fixed)
+    - name: 📊 Pre-Migration Database State Check (Fixed Environment Variables)
       timeout-minutes: 3
       run: |
         echo "=== 📊 PRE-MIGRATION DATABASE STATE CHECK ==="
         
-        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        DB_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
         if [ -z "$DB_HOST" ]; then
           echo "❌ Database host not available"
@@ -452,7 +474,8 @@ jobs:
         echo "Database Host: $DB_HOST"
         echo "Creating database state check pod..."
         
-        cat << EOF | kubectl apply -f -
+        # Create pod manifest with variables properly substituted
+        cat > /tmp/db-state-check.yaml << EOF
         apiVersion: v1
         kind: Pod
         metadata:
@@ -470,7 +493,7 @@ jobs:
                   name: zoneapi-db-secret
                   key: password
             - name: DB_HOST
-              value: "${DB_HOST}"
+              value: "$DB_HOST"
             command:
             - /bin/sh
             - -c
@@ -497,6 +520,9 @@ jobs:
               echo "✅ Database state check completed"
         EOF
         
+        # Apply the pod manifest
+        kubectl apply -f /tmp/db-state-check.yaml
+        
         echo "Waiting for database state check to complete..."
         
         # Wait for pod to complete
@@ -522,14 +548,14 @@ jobs:
         
         echo "✅ Database state check completed!"
 
-    - name: Run Database Migration (efbundle Approach) with Enhanced Monitoring
-      timeout-minutes: 3
+    - name: 🚀 Run Database Migration (efbundle Approach) with Enhanced Monitoring
+      timeout-minutes: 10
       run: |
         echo "=== 🚀 RUNNING DATABASE MIGRATION (EFBUNDLE APPROACH) ==="
         
         # Set environment variables for migration script
-        export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
-        export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
+        export ACR_LOGIN_SERVER="${{ needs.deploy-infrastructure.outputs.acr-login-server }}"
+        export DATABASE_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
         export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         export NAMESPACE="zoneapi"
@@ -537,27 +563,9 @@ jobs:
         
         # Debug: Check if environment variables are set
         echo "=== Environment Variable Debug ==="
-        echo "ACR_LOGIN_SERVER from infra step: ${ACR_LOGIN_SERVER:-[EMPTY]}"
-        echo "DATABASE_HOST from infra step: ${DATABASE_HOST:-[EMPTY]}"
-        echo "IMAGE_TAG from docker build: ${IMAGE_TAG:-[EMPTY]}"
-        
-        # Fallback: If ACR_LOGIN_SERVER is empty, try to get it from Terraform directly
-        if [ -z "$ACR_LOGIN_SERVER" ]; then
-          echo "⚠️ ACR_LOGIN_SERVER is empty, attempting to retrieve from Terraform..."
-          cd terraform && terraform init
-          ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server 2>/dev/null || echo "")
-          echo "ACR_LOGIN_SERVER from Terraform: ${ACR_LOGIN_SERVER:-[STILL EMPTY]}"
-          cd ..
-        fi
-        
-        # Fallback: If DATABASE_HOST is empty, try to get it from Terraform directly  
-        if [ -z "$DATABASE_HOST" ]; then
-          echo "⚠️ DATABASE_HOST is empty, attempting to retrieve from Terraform..."
-          cd terraform && terraform init
-          DATABASE_HOST=$(terraform output -raw postgres_server_fqdn 2>/dev/null || echo "")
-          echo "DATABASE_HOST from Terraform: ${DATABASE_HOST:-[STILL EMPTY]}"
-          cd ..
-        fi
+        echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER:-[EMPTY]}"
+        echo "DATABASE_HOST: ${DATABASE_HOST:-[EMPTY]}"
+        echo "IMAGE_TAG: ${IMAGE_TAG:-[EMPTY]}"
         
         # Final validation
         if [ -z "$ACR_LOGIN_SERVER" ] || [ -z "$DATABASE_HOST" ] || [ -z "$DB_PASSWORD" ] || [ -z "$IMAGE_TAG" ]; then
@@ -576,23 +584,13 @@ jobs:
         echo "- Namespace: $NAMESPACE"
         echo "- Timeout: $TIMEOUT seconds"
         
-        # Setup Helm
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-        
         # Make script executable
         chmod +x ./scripts/run-migration.sh
         
         # Start migration monitoring in background
+        export CONTINUOUS_MONITORING=true
         ./scripts/monitor-pipeline.sh &
         MONITOR_PID=$!
-        
-        # Export environment variables for the migration script
-        export ACR_LOGIN_SERVER="$ACR_LOGIN_SERVER"
-        export DATABASE_HOST="$DATABASE_HOST"
-        export DB_PASSWORD="$DB_PASSWORD"
-        export IMAGE_TAG="$IMAGE_TAG"
-        export NAMESPACE="$NAMESPACE"
-        export TIMEOUT="$TIMEOUT"
         
         # Run migration using efbundle approach
         echo "🏃‍♂️ Starting migration process..."
@@ -650,12 +648,12 @@ jobs:
           echo "⚠️  No migration job found"
         fi
 
-    - name: 📊 Post-Migration Database Verification (Fixed)
+    - name: 📊 Post-Migration Database Verification (Fixed Environment Variables)
       timeout-minutes: 3
       run: |
         echo "=== 📊 POST-MIGRATION DATABASE VERIFICATION ==="
         
-        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        DB_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
         if [ -z "$DB_HOST" ]; then
           echo "❌ Database host not available"
@@ -665,7 +663,8 @@ jobs:
         echo "Database Host: $DB_HOST"
         echo "Creating post-migration verification pod..."
         
-        cat << EOF | kubectl apply -f -
+        # Create pod manifest with variables properly substituted
+        cat > /tmp/post-migration-check.yaml << EOF
         apiVersion: v1
         kind: Pod
         metadata:
@@ -683,7 +682,7 @@ jobs:
                   name: zoneapi-db-secret
                   key: password
             - name: DB_HOST
-              value: "${DB_HOST}"
+              value: "$DB_HOST"
             command:
             - /bin/sh
             - -c
@@ -710,6 +709,9 @@ jobs:
               echo ""
               echo "✅ Post-migration verification completed successfully"
         EOF
+        
+        # Apply the pod manifest
+        kubectl apply -f /tmp/post-migration-check.yaml
         
         echo "Waiting for post-migration verification to complete..."
         
@@ -742,12 +744,12 @@ jobs:
         
         echo "✅ Post-migration database verification completed!"
 
-    - name: 🛠️ Comprehensive Migration Troubleshooting (Fixed)
+    - name: 🛠️ Comprehensive Migration Troubleshooting (Fixed Environment Variables)
       if: failure()
       run: |
         echo "=== 🛠️ COMPREHENSIVE MIGRATION TROUBLESHOOTING ==="
         
-        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        DB_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
         if [ -z "$DB_HOST" ]; then
           echo "❌ Database host not available for troubleshooting"
@@ -774,7 +776,7 @@ jobs:
         chmod +x ./scripts/debug-health-checks.sh
         ./scripts/debug-health-checks.sh || echo "Health check script completed with issues"
     
-    - name: Verify Migration Success (Fixed)
+    - name: ✅ Verify Migration Success (Enhanced Detection)
       if: always()
       run: |
         echo "=== FINAL MIGRATION STATUS SUMMARY ==="
@@ -791,7 +793,7 @@ jobs:
         echo "Checking jobs with 'migration' in name..."
         kubectl get jobs -n zoneapi --no-headers 2>/dev/null | grep -i migration || echo "No jobs with migration in name found"
         
-        # Check completed jobs using a more reliable method
+        # Enhanced job detection using multiple methods
         completed_jobs=""
         failed_jobs=""
         
@@ -859,8 +861,8 @@ jobs:
               exit 0
             else
               echo "No running migration pods found"
-          exit 1
-        fi
+              exit 1
+            fi
           fi
         else
           echo "⚠️ No migration jobs found"
@@ -908,37 +910,12 @@ jobs:
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.5.0
-        terraform_wrapper: false
-
-    - name: Get ACR login server from Terraform
-      id: acr-info
-      run: |
-        # Setup Terraform backend
-        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
-          echo "Setting up Terraform backend..."
-          ./scripts/setup-terraform-backend.sh
-        fi
-        
-        cd terraform
-        terraform init
-        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
-        echo "login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
-      env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-    
     - name: 🔧 Validate Deployment Configuration
       run: |
         echo "=== 🔧 VALIDATING DEPLOYMENT CONFIGURATION ==="
         
         # Validate required variables
-        ACR_LOGIN_SERVER="${{ steps.acr-info.outputs.login-server }}"
+        ACR_LOGIN_SERVER="${{ needs.deploy-infrastructure.outputs.acr-login-server }}"
         IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         POSTGRES_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
@@ -958,10 +935,10 @@ jobs:
         echo "✅ All deployment variables validated successfully!"
 
     - name: 🚀 Deploy Application (Post-Migration)
-      timeout-minutes: 3
+      timeout-minutes: 5
       run: |
         echo "=== 🚀 DEPLOYING APPLICATION (POST-MIGRATION) ==="
-        echo "Image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}"
+        echo "Image: ${{ needs.deploy-infrastructure.outputs.acr-login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}"
         echo "Database: ${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
         # Deploy application with proven working configuration
@@ -969,7 +946,7 @@ jobs:
           --namespace zoneapi \
           --create-namespace \
           --set migration.enabled=false \
-          --set image.repository=${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }} \
+          --set image.repository=${{ needs.deploy-infrastructure.outputs.acr-login-server }}/${{ env.IMAGE_NAME }} \
           --set image.tag=${{ needs.docker-build-push.outputs.image-tag }} \
           --set imagePullSecrets[0].name=acr-secret \
           --set database.host=${{ needs.deploy-infrastructure.outputs.postgres-host }} \
@@ -978,7 +955,7 @@ jobs:
           --set readinessProbe.enabled=true \
           --set replicaCount=1 \
           --force \
-          --wait --timeout=3m \
+          --wait --timeout=5m \
           --debug
         
         echo "✅ Application deployed successfully!"
@@ -1123,78 +1100,3 @@ jobs:
           echo "❌ Comprehensive validation failed!"
           exit 1
         fi 
-
-    - name: Create ACR Secret and Pre-deployment Validation
-      timeout-minutes: 2
-      run: |
-        echo "=== 🔐 CREATING ACR SECRET AND VALIDATION ==="
-        
-        # Get ACR credentials
-        ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
-        
-        if [ -z "$ACR_LOGIN_SERVER" ]; then
-          echo "❌ ACR login server not available"
-          exit 1
-        fi
-        
-        echo "ACR Login Server: $ACR_LOGIN_SERVER"
-        
-        # Get ACR credentials for secret creation
-        ACR_USERNAME=$(az acr credential show --name "${ACR_LOGIN_SERVER%%.azurecr.io}" --query username --output tsv)
-        ACR_PASSWORD=$(az acr credential show --name "${ACR_LOGIN_SERVER%%.azurecr.io}" --query passwords[0].value --output tsv)
-        
-        echo "Creating ACR secret in namespace..."
-        kubectl create secret docker-registry acr-secret \
-          --namespace=zoneapi \
-          --docker-server="$ACR_LOGIN_SERVER" \
-          --docker-username="$ACR_USERNAME" \
-          --docker-password="$ACR_PASSWORD" \
-          --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Verify secret was created
-        if kubectl get secret acr-secret -n zoneapi >/dev/null 2>&1; then
-          echo "✅ ACR secret created successfully"
-        else
-          echo "❌ Failed to create ACR secret"
-          exit 1
-        fi
-        
-        # Verify we can pull the image
-        IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
-        FULL_IMAGE="$ACR_LOGIN_SERVER/zoneapi:$IMAGE_TAG"
-        
-        echo "Testing image pull: $FULL_IMAGE"
-        
-        # Create a test pod to verify image can be pulled
-        cat << EOF | kubectl apply -f -
-        apiVersion: v1
-        kind: Pod
-        metadata:
-          name: acr-image-test
-          namespace: zoneapi
-        spec:
-          restartPolicy: Never
-          imagePullSecrets:
-          - name: acr-secret
-          containers:
-          - name: test
-            image: $FULL_IMAGE
-            command: ["/bin/sh", "-c", "echo 'Image pull successful'; exit 0"]
-        EOF
-        
-        echo "Waiting for image pull test..."
-        sleep 10
-        
-        # Check if image pull was successful
-        pod_status=$(kubectl get pod acr-image-test -n zoneapi -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-        if [ "$pod_status" = "Succeeded" ] || [ "$pod_status" = "Running" ]; then
-          echo "✅ Image pull test successful"
-        else
-          echo "⚠️ Image pull test status: $pod_status"
-          kubectl describe pod acr-image-test -n zoneapi || true
-        fi
-        
-        # Clean up test pod
-        kubectl delete pod acr-image-test -n zoneapi --ignore-not-found=true
-        
-        echo "✅ ACR configuration and validation completed" 
