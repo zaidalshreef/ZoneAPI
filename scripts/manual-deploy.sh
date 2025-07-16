@@ -99,21 +99,34 @@ check_secrets() {
 prepare_deployment_files() {
     print_status "Preparing deployment files with current environment..."
 
-    # Use absolute paths to avoid path resolution issues
-    local base_dir="$(pwd)"
-    local temp_dir="$base_dir/manual-deploy/temp"
+    # Find the repository root directory (where manual-deploy exists)
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_root="$(cd "$script_dir/.." && pwd)"
 
-    print_status "Base directory: $base_dir"
-    print_status "Temp directory: $temp_dir"
+    print_status "Script directory: $script_dir"
+    print_status "Repository root: $repo_root"
+    print_status "Current working directory: $(pwd)"
+
+    # Check if manual-deploy exists in repo root
+    if [ ! -d "$repo_root/manual-deploy" ]; then
+        # Try current directory
+        repo_root="$(pwd)"
+        print_status "Trying current directory as repo root: $repo_root"
+    fi
+
+    local temp_dir="$repo_root/manual-deploy/temp"
+    print_status "Final temp directory: $temp_dir"
 
     mkdir -p "$temp_dir"
 
     # Check if manual-deploy files exist
-    local source_dir="$base_dir/manual-deploy"
+    local source_dir="$repo_root/manual-deploy"
     if [ ! -d "$source_dir" ]; then
         print_error "manual-deploy directory not found: $source_dir"
-        print_status "Available directories in $base_dir:"
-        ls -la "$base_dir"
+        print_status "Available directories in $repo_root:"
+        ls -la "$repo_root"
+        print_status "Available directories in current dir $(pwd):"
+        ls -la "$(pwd)"
         exit 1
     fi
 
@@ -143,7 +156,7 @@ prepare_deployment_files() {
 
     if [ $files_found -eq 0 ]; then
         print_error "No deployment files found in $source_dir"
-        print_status "Current directory: $base_dir"
+        print_status "Repository root: $repo_root"
         print_status "Looking for files matching: $source_dir/0*.yaml"
         exit 1
     fi
@@ -172,14 +185,29 @@ deploy_resources() {
     local temp_dir="$1"
 
     print_status "Deploying resources to Kubernetes..."
-    print_status "Deployment directory: $temp_dir"
+    print_status "Received temp directory path: '$temp_dir'"
+    print_status "Current working directory: $(pwd)"
+
+    # Ensure we have an absolute path
+    if [[ ! "$temp_dir" = /* ]]; then
+        temp_dir="$(pwd)/$temp_dir"
+        print_status "Converted to absolute path: $temp_dir"
+    fi
 
     # List what's actually in the temp directory
     if [ -d "$temp_dir" ]; then
+        print_status "✓ Temp directory exists"
         print_status "Files in temp directory:"
         ls -la "$temp_dir"
     else
-        print_error "Temp directory $temp_dir does not exist!"
+        print_error "✗ Temp directory $temp_dir does not exist!"
+
+        # Try to find where it might be
+        print_status "Searching for manual-deploy directories..."
+        find "$(pwd)" -name "manual-deploy" -type d 2>/dev/null || true
+        print_status "Searching for temp directories..."
+        find "$(pwd)" -name "temp" -type d 2>/dev/null || true
+
         exit 1
     fi
 
@@ -318,10 +346,24 @@ check_deployment() {
 # Function to cleanup temp files
 cleanup() {
     print_status "Cleaning up temporary files..."
-    local temp_dir="$(pwd)/manual-deploy/temp"
+
+    # Find the repository root (same logic as prepare_deployment_files)
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_root="$(cd "$script_dir/.." && pwd)"
+
+    if [ ! -d "$repo_root/manual-deploy" ]; then
+        repo_root="$(pwd)"
+    fi
+
+    local temp_dir="$repo_root/manual-deploy/temp"
     print_status "Removing: $temp_dir"
-    rm -rf "$temp_dir"
-    print_success "Cleanup completed"
+
+    if [ -d "$temp_dir" ]; then
+        rm -rf "$temp_dir"
+        print_success "Cleanup completed"
+    else
+        print_warning "Temp directory not found: $temp_dir"
+    fi
 }
 
 # Main function
