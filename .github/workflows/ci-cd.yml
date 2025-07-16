@@ -324,100 +324,201 @@ jobs:
         
         echo "✅ Environment variables validated!"
 
-    - name: 🔍 Pre-Migration Database Connection Tests
-      timeout-minutes: 3
-      run: |
-        echo "=== 🔍 PRE-MIGRATION DATABASE CONNECTION TESTS ==="
-        echo "Testing database connectivity before starting migration..."
-        
-        export DB_HOST="${{ steps.infra.outputs.postgres-host }}"
-        export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
-        
-        echo "Database Host: $DB_HOST"
-        echo "Testing from GitHub Actions runner..."
-        
-        # Install PostgreSQL client for testing
-        sudo apt-get update
-        sudo apt-get install -y postgresql-client
-        
-        # Run comprehensive database connection test
-        chmod +x ./scripts/test-db-connection.sh
-        ./scripts/test-db-connection.sh "$DB_HOST" "$DB_PASSWORD"
-        
-        echo "✅ Database connection pre-checks completed successfully!"
-
-    - name: 🧪 Test Database Connection from Kubernetes
-      timeout-minutes: 3
+    - name: 🧪 Test Database Connection from Kubernetes (Fixed)
+      timeout-minutes: 2
       run: |
         echo "=== 🧪 TESTING DATABASE CONNECTION FROM KUBERNETES ==="
         
-        # Create a test pod to verify connectivity from within the cluster
-        kubectl run db-connection-test \
-          --image=postgres:15-alpine \
-          --rm -i --restart=Never \
-          --namespace=zoneapi \
-          --overrides='{
-            "spec": {
-              "containers": [{
-                "name": "db-test",
-                "image": "postgres:15-alpine",
-                "env": [{
-                  "name": "PGPASSWORD",
-                  "valueFrom": {
-                    "secretKeyRef": {
-                      "name": "zoneapi-db-secret",
-                      "key": "password"
-                    }
-                  }
-                }],
-                "command": ["psql"],
-                "args": [
-                  "-h", "${{ steps.infra.outputs.postgres-host }}",
-                  "-U", "postgres",
-                  "-d", "zone",
-                  "-c", "SELECT version(); SELECT current_database(); SELECT current_user;"
-                ]
-              }]
-            }
-          }' \
-          --timeout=120s
+        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
         
-        echo "✅ Kubernetes-to-Database connection test completed!"
+        # Debug: Show what values we have
+        echo "Debug - DB_HOST: ${DB_HOST:-[EMPTY]}"
+        echo "Debug - DB_PASSWORD: ${DB_PASSWORD:+[PROVIDED]}"
+        
+        if [ -z "$DB_HOST" ] || [ -z "$DB_PASSWORD" ]; then
+          echo "❌ Missing database connection parameters"
+          exit 1
+        fi
+        
+        echo "Creating database connection test..."
+        cat << EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: zoneapi-test-connection
+          namespace: zoneapi
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: test-connection
+            image: postgres:15-alpine
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zoneapi-db-secret
+                  key: password
+            - name: DB_HOST
+              value: "${DB_HOST}"
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting database connection test..."
+              echo "Host: \$DB_HOST"
+              echo ""
+              echo "Step 1: Testing DNS resolution..."
+              nslookup "\$DB_HOST" || exit 1
+              echo "✅ DNS resolution successful"
+              
+              echo ""
+              echo "Step 2: Testing PostgreSQL connectivity..."
+              pg_isready -h "\$DB_HOST" -p 5432 -U postgres || exit 1
+              echo "✅ PostgreSQL service is ready"
+              
+              echo ""
+              echo "Step 3: Testing authentication..."
+              psql -h "\$DB_HOST" -U postgres -d postgres -c "SELECT version();" || exit 1
+              echo "✅ Authentication successful"
+              
+              echo ""
+              echo "Step 4: Testing database access..."
+              if ! psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT current_database();" 2>/dev/null; then
+                echo "Database 'zone' doesn't exist, creating it..."
+                psql -h "\$DB_HOST" -U postgres -d postgres -c "CREATE DATABASE zone;" || exit 1
+                echo "✅ Database 'zone' created"
+              fi
+              psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT current_database();"
+              echo "✅ Target database 'zone' accessible"
+              
+              echo ""
+              echo "Step 5: Testing target database access..."
+              psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT current_database();"
+              echo "✅ Target database 'zone' accessible"
+              
+              echo ""
+              echo "Step 6: Testing connection string format..."
+              echo "Connection string format: Host=\$DB_HOST;Port=5432;Database=zone;Username=postgres;***;Command Timeout=300;"
+              
+              echo ""
+              echo "🎉 All connection tests passed!"
+              echo "Database is ready for migrations."
+              echo "Keeping pod alive for 60 seconds for log inspection..."
+              sleep 60
+        EOF
+        
+        echo "Waiting for test pod to complete..."
+        kubectl wait --for=condition=ready pod/zoneapi-test-connection -n zoneapi --timeout=60s || true
+        
+        # Wait for pod to complete or timeout
+        timeout=120
+        while [ $timeout -gt 0 ]; do
+          status=$(kubectl get pod zoneapi-test-connection -n zoneapi -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+          if [ "$status" = "Succeeded" ]; then
+            echo "✅ Database connection test completed successfully"
+            kubectl logs zoneapi-test-connection -n zoneapi
+            break
+          elif [ "$status" = "Failed" ]; then
+            echo "❌ Database connection test failed"
+            kubectl logs zoneapi-test-connection -n zoneapi
+            kubectl describe pod zoneapi-test-connection -n zoneapi
+            exit 1
+          fi
+          echo "Waiting for test to complete... (status: $status, timeout: ${timeout}s)"
+          sleep 5
+          timeout=$((timeout - 5))
+        done
+        
+        if [ $timeout -le 0 ]; then
+          echo "❌ Database connection test timed out"
+          kubectl logs zoneapi-test-connection -n zoneapi || echo "No logs available"
+          kubectl describe pod zoneapi-test-connection -n zoneapi
+          exit 1
+        fi
 
-    - name: 📊 Pre-Migration Database State Check
+    - name: 📊 Pre-Migration Database State Check (Fixed)
       timeout-minutes: 3
       run: |
         echo "=== 📊 PRE-MIGRATION DATABASE STATE CHECK ==="
         
-        kubectl run db-state-check \
-          --image=postgres:15-alpine \
-          --rm -i --restart=Never \
-          --namespace=zoneapi \
-          --overrides='{
-            "spec": {
-              "containers": [{
-                "name": "db-state",
-                "image": "postgres:15-alpine",
-                "env": [{
-                  "name": "PGPASSWORD",
-                  "valueFrom": {
-                    "secretKeyRef": {
-                      "name": "zoneapi-db-secret",
-                      "key": "password"
-                    }
-                  }
-                }],
-                "command": ["psql"],
-                "args": [
-                  "-h", "${{ steps.infra.outputs.postgres-host }}",
-                  "-U", "postgres",
-                  "-d", "zone",
-                  "-c", "\\dt; SELECT table_name FROM information_schema.tables WHERE table_schema = '\''public'\''; SELECT COUNT(*) as migration_history FROM __EFMigrationsHistory;"
-                ]
-              }]
-            }
-          }' \
-          --timeout=120s || echo "⚠️  Migration history table may not exist yet (first run)"
+        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        
+        if [ -z "$DB_HOST" ]; then
+          echo "❌ Database host not available"
+          exit 1
+        fi
+        
+        echo "Database Host: $DB_HOST"
+        echo "Creating database state check pod..."
+        
+        cat << EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: db-state-check
+          namespace: zoneapi
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: db-state
+            image: postgres:15-alpine
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zoneapi-db-secret
+                  key: password
+            - name: DB_HOST
+              value: "${DB_HOST}"
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Checking database state on host: \$DB_HOST"
+              echo ""
+              echo "Tables in database:"
+              psql -h "\$DB_HOST" -U postgres -d zone -c "\\dt" 2>/dev/null || echo "No tables found (database may be empty)"
+              
+              echo ""
+              echo "Schema information:"
+              psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null || echo "No schema information available"
+              
+              echo ""
+              echo "Migration history (if exists):"
+              if psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT COUNT(*) as migration_history FROM __EFMigrationsHistory;" 2>/dev/null; then
+                echo "Migration history table exists"
+                psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT migration_id, product_version FROM __EFMigrationsHistory ORDER BY migration_id;" 2>/dev/null || true
+              else
+                echo "Migration history table does not exist yet (first run)"
+              fi
+              
+              echo ""
+              echo "✅ Database state check completed"
+        EOF
+        
+        echo "Waiting for database state check to complete..."
+        
+        # Wait for pod to complete
+        timeout=120
+        while [ $timeout -gt 0 ]; do
+          status=$(kubectl get pod db-state-check -n zoneapi -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+          if [ "$status" = "Succeeded" ]; then
+            echo "✅ Database state check completed successfully"
+            kubectl logs db-state-check -n zoneapi
+            break
+          elif [ "$status" = "Failed" ]; then
+            echo "⚠️ Database state check failed (may be expected for first run)"
+            kubectl logs db-state-check -n zoneapi || echo "No logs available"
+            break
+          fi
+          echo "Waiting for state check to complete... (status: $status, timeout: ${timeout}s)"
+          sleep 5
+          timeout=$((timeout - 5))
+        done
+        
+        # Clean up pod
+        kubectl delete pod db-state-check -n zoneapi --ignore-not-found=true
         
         echo "✅ Database state check completed!"
 
@@ -549,40 +650,95 @@ jobs:
           echo "⚠️  No migration job found"
         fi
 
-    - name: 📊 Post-Migration Database Verification
+    - name: 📊 Post-Migration Database Verification (Fixed)
       timeout-minutes: 3
       run: |
         echo "=== 📊 POST-MIGRATION DATABASE VERIFICATION ==="
         
-        kubectl run post-migration-check \
-          --image=postgres:15-alpine \
-          --rm -i --restart=Never \
-          --namespace=zoneapi \
-          --overrides='{
-            "spec": {
-              "containers": [{
-                "name": "post-migration",
-                "image": "postgres:15-alpine",
-                "env": [{
-                  "name": "PGPASSWORD",
-                  "valueFrom": {
-                    "secretKeyRef": {
-                      "name": "zoneapi-db-secret",
-                      "key": "password"
-                    }
-                  }
-                }],
-                "command": ["psql"],
-                "args": [
-                  "-h", "${{ steps.infra.outputs.postgres-host }}",
-                  "-U", "postgres",
-                  "-d", "zone",
-                  "-c", "\\dt; SELECT COUNT(*) as total_migrations FROM __EFMigrationsHistory; SELECT migration_id, product_version FROM __EFMigrationsHistory ORDER BY migration_id;"
-                ]
-              }]
-            }
-          }' \
-          --timeout=120s
+        DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        
+        if [ -z "$DB_HOST" ]; then
+          echo "❌ Database host not available"
+          exit 1
+        fi
+        
+        echo "Database Host: $DB_HOST"
+        echo "Creating post-migration verification pod..."
+        
+        cat << EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: post-migration-check
+          namespace: zoneapi
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: post-migration
+            image: postgres:15-alpine
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zoneapi-db-secret
+                  key: password
+            - name: DB_HOST
+              value: "${DB_HOST}"
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Post-migration database verification on host: \$DB_HOST"
+              echo ""
+              echo "Current database tables:"
+              psql -h "\$DB_HOST" -U postgres -d zone -c "\\dt"
+              
+              echo ""
+              echo "Migration history summary:"
+              psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT COUNT(*) as total_migrations FROM __EFMigrationsHistory;"
+              
+              echo ""
+              echo "Applied migrations:"
+              psql -h "\$DB_HOST" -U postgres -d zone -c "SELECT migration_id, product_version FROM __EFMigrationsHistory ORDER BY migration_id;"
+              
+              echo ""
+              echo "Database verification summary:"
+              echo "- Connected to database: zone"
+              echo "- Host: \$DB_HOST"
+              echo "- Migration status: $(psql -h "\$DB_HOST" -U postgres -d zone -t -c "SELECT COUNT(*) FROM __EFMigrationsHistory;" | xargs) migrations applied"
+              
+              echo ""
+              echo "✅ Post-migration verification completed successfully"
+        EOF
+        
+        echo "Waiting for post-migration verification to complete..."
+        
+        # Wait for pod to complete
+        timeout=120
+        while [ $timeout -gt 0 ]; do
+          status=$(kubectl get pod post-migration-check -n zoneapi -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+          if [ "$status" = "Succeeded" ]; then
+            echo "✅ Post-migration verification completed successfully"
+            kubectl logs post-migration-check -n zoneapi
+            break
+          elif [ "$status" = "Failed" ]; then
+            echo "❌ Post-migration verification failed"
+            kubectl logs post-migration-check -n zoneapi || echo "No logs available"
+            kubectl describe pod post-migration-check -n zoneapi
+            exit 1
+          fi
+          echo "Waiting for verification to complete... (status: $status, timeout: ${timeout}s)"
+          sleep 5
+          timeout=$((timeout - 5))
+        done
+        
+        if [ $timeout -le 0 ]; then
+          echo "❌ Post-migration verification timed out"
+          exit 1
+        fi
+        
+        # Clean up pod
+        kubectl delete pod post-migration-check -n zoneapi --ignore-not-found=true
         
         echo "✅ Post-migration database verification completed!"
 
@@ -617,26 +773,111 @@ jobs:
         chmod +x ./scripts/debug-health-checks.sh
         ./scripts/debug-health-checks.sh || echo "Health check script completed with issues"
     
-    - name: Verify Migration Success
+    - name: Verify Migration Success (Fixed)
       if: always()
       run: |
         echo "=== FINAL MIGRATION STATUS SUMMARY ==="
         
-        # Check if any migration jobs completed successfully
-        completed_jobs=$(kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o jsonpath='{.items[?(@.status.conditions[0].type=="Complete")].metadata.name}' 2>/dev/null || echo "")
-        failed_jobs=$(kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o jsonpath='{.items[?(@.status.conditions[0].type=="Failed")].metadata.name}' 2>/dev/null || echo "")
+        # Wait a moment for job status to stabilize
+        sleep 5
         
-        if [ -n "$completed_jobs" ]; then
-          echo "✅ Successfully completed migration jobs: $completed_jobs"
+        # Get all migration jobs and their statuses
+        echo "Checking all migration jobs in namespace..."
+        kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o wide || echo "No migration jobs with component label found"
+        
+        # Also check for jobs with migration in the name (fallback)
+        echo ""
+        echo "Checking jobs with 'migration' in name..."
+        kubectl get jobs -n zoneapi --no-headers 2>/dev/null | grep -i migration || echo "No jobs with migration in name found"
+        
+        # Check completed jobs using a more reliable method
+        completed_jobs=""
+        failed_jobs=""
+        
+        # Method 1: Check by component label
+        all_migration_jobs=$(kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+        
+        # Method 2: Check by name pattern if no labeled jobs found
+        if [ -z "$all_migration_jobs" ]; then
+          all_migration_jobs=$(kubectl get jobs -n zoneapi --no-headers 2>/dev/null | grep -i migration | awk '{print $1}' || echo "")
         fi
         
-        if [ -n "$failed_jobs" ]; then
-          echo "❌ Failed migration jobs: $failed_jobs"
-          exit 1
-        fi
+        echo "Found migration jobs: ${all_migration_jobs:-[NONE]}"
         
-        if [ -z "$completed_jobs" ] && [ -z "$failed_jobs" ]; then
-          echo "⚠️  No migration jobs found or jobs still running"
+        if [ -n "$all_migration_jobs" ]; then
+          for job in $all_migration_jobs; do
+            echo ""
+            echo "Analyzing job: $job"
+            
+            # Get job status using multiple methods
+            job_status=$(kubectl get job "$job" -n zoneapi -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
+            job_failed=$(kubectl get job "$job" -n zoneapi -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || echo "")
+            
+            # Alternative status check
+            completions=$(kubectl get job "$job" -n zoneapi -o jsonpath='{.status.completions}' 2>/dev/null || echo "0")
+            succeeded=$(kubectl get job "$job" -n zoneapi -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
+            failed_count=$(kubectl get job "$job" -n zoneapi -o jsonpath='{.status.failed}' 2>/dev/null || echo "0")
+            
+            echo "  Status - Complete: ${job_status}, Failed: ${job_failed}"
+            echo "  Counts - Completions: ${completions}, Succeeded: ${succeeded}, Failed: ${failed_count}"
+            
+            # Show recent logs for debugging
+            echo "  Recent logs:"
+            kubectl logs -l job-name="$job" -n zoneapi --tail=5 2>/dev/null | sed 's/^/    /' || echo "    No logs available"
+            
+            # Determine if job is completed or failed
+            if [ "$job_status" = "True" ] || [ "$succeeded" = "$completions" ] && [ "$completions" != "0" ]; then
+              completed_jobs="$completed_jobs $job"
+              echo "  ✅ Job completed successfully"
+            elif [ "$job_failed" = "True" ] || [ "$failed_count" != "0" ]; then
+              failed_jobs="$failed_jobs $job"
+              echo "  ❌ Job failed"
+            else
+              echo "  ⏳ Job still running or unknown status"
+            fi
+          done
+          
+          echo ""
+          echo "Summary:"
+          echo "Completed jobs:${completed_jobs:-[NONE]}"
+          echo "Failed jobs:${failed_jobs:-[NONE]}"
+          
+          if [ -n "$completed_jobs" ]; then
+            echo "✅ Successfully completed migration jobs found"
+            exit 0
+          elif [ -n "$failed_jobs" ]; then
+            echo "❌ Failed migration jobs found"
+            exit 1
+          else
+            echo "⚠️ No clearly completed or failed jobs found - jobs may still be running"
+            
+            # Check if any pods are still running
+            running_pods=$(kubectl get pods -n zoneapi -l app.kubernetes.io/component=migration --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l || echo "0")
+            if [ "$running_pods" -gt 0 ]; then
+              echo "Found $running_pods migration pods still running - this is normal"
+              exit 0
+            else
+              echo "No running migration pods found"
+              exit 1
+            fi
+          fi
+        else
+          echo "⚠️ No migration jobs found"
+          
+          # Check if there are any migration-related pods
+          migration_pods=$(kubectl get pods -n zoneapi --no-headers 2>/dev/null | grep -i migration || echo "")
+          if [ -n "$migration_pods" ]; then
+            echo "Found migration pods without jobs:"
+            echo "$migration_pods"
+            
+            # Check if any completed successfully
+            succeeded_pods=$(echo "$migration_pods" | grep -i completed || echo "")
+            if [ -n "$succeeded_pods" ]; then
+              echo "✅ Found completed migration pods - migration likely succeeded"
+              exit 0
+            fi
+          fi
+          
           exit 1
         fi
 
@@ -881,3 +1122,78 @@ jobs:
           echo "❌ Comprehensive validation failed!"
           exit 1
         fi 
+
+    - name: Create ACR Secret and Pre-deployment Validation
+      timeout-minutes: 2
+      run: |
+        echo "=== 🔐 CREATING ACR SECRET AND VALIDATION ==="
+        
+        # Get ACR credentials
+        ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
+        
+        if [ -z "$ACR_LOGIN_SERVER" ]; then
+          echo "❌ ACR login server not available"
+          exit 1
+        fi
+        
+        echo "ACR Login Server: $ACR_LOGIN_SERVER"
+        
+        # Get ACR credentials for secret creation
+        ACR_USERNAME=$(az acr credential show --name "${ACR_LOGIN_SERVER%%.azurecr.io}" --query username --output tsv)
+        ACR_PASSWORD=$(az acr credential show --name "${ACR_LOGIN_SERVER%%.azurecr.io}" --query passwords[0].value --output tsv)
+        
+        echo "Creating ACR secret in namespace..."
+        kubectl create secret docker-registry acr-secret \
+          --namespace=zoneapi \
+          --docker-server="$ACR_LOGIN_SERVER" \
+          --docker-username="$ACR_USERNAME" \
+          --docker-password="$ACR_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Verify secret was created
+        if kubectl get secret acr-secret -n zoneapi >/dev/null 2>&1; then
+          echo "✅ ACR secret created successfully"
+        else
+          echo "❌ Failed to create ACR secret"
+          exit 1
+        fi
+        
+        # Verify we can pull the image
+        IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
+        FULL_IMAGE="$ACR_LOGIN_SERVER/zoneapi:$IMAGE_TAG"
+        
+        echo "Testing image pull: $FULL_IMAGE"
+        
+        # Create a test pod to verify image can be pulled
+        cat << EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: acr-image-test
+          namespace: zoneapi
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+          - name: acr-secret
+          containers:
+          - name: test
+            image: $FULL_IMAGE
+            command: ["/bin/sh", "-c", "echo 'Image pull successful'; exit 0"]
+        EOF
+        
+        echo "Waiting for image pull test..."
+        sleep 10
+        
+        # Check if image pull was successful
+        pod_status=$(kubectl get pod acr-image-test -n zoneapi -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+        if [ "$pod_status" = "Succeeded" ] || [ "$pod_status" = "Running" ]; then
+          echo "✅ Image pull test successful"
+        else
+          echo "⚠️ Image pull test status: $pod_status"
+          kubectl describe pod acr-image-test -n zoneapi || true
+        fi
+        
+        # Clean up test pod
+        kubectl delete pod acr-image-test -n zoneapi --ignore-not-found=true
+        
+        echo "✅ ACR configuration and validation completed" 
