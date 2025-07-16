@@ -10,6 +10,13 @@ env:
   IMAGE_NAME: zoneapi
   HELM_VERSION: 3.12.0
 
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  id-token: write
+  pull-requests: read
+
 jobs:
   # Build and Test Job
   build-and-test:
@@ -57,9 +64,11 @@ jobs:
         output: 'trivy-source-results.sarif'
         
     - name: 📊 Upload Source Code Scan Results to GitHub Security Tab
+      if: always() && github.event_name != 'pull_request'
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: 'trivy-source-results.sarif'
+        category: 'trivy-source-code'
         
     - name: 🔍 Run Trivy Source Code Table Report
       uses: aquasecurity/trivy-action@master
@@ -79,6 +88,14 @@ jobs:
         format: 'table'
         exit-code: '1'
         
+    - name: 📊 Upload SARIF for Pull Requests (Alternative)
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-source-sarif-pr
+        path: trivy-source-results.sarif
+        retention-days: 7
+
     - name: 📤 Upload Source Security Report
       if: always()
       uses: actions/upload-artifact@v4
@@ -263,9 +280,11 @@ jobs:
         output: 'trivy-results.sarif'
 
     - name: 📊 Upload Trivy Scan Results to GitHub Security Tab
+      if: always() && github.event_name != 'pull_request'
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: 'trivy-results.sarif'
+        category: 'trivy-container-image'
 
     - name: 🔍 Run Trivy Filesystem Scan
       uses: aquasecurity/trivy-action@master
