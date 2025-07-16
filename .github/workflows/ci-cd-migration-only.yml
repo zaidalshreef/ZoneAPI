@@ -21,7 +21,7 @@ jobs:
     - name: Get AKS credentials
       run: |
         az aks get-credentials \
-          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --resource-group ${{ secrets.AKS_RESOURCE_GROUP }} \
           --name ${{ secrets.AKS_CLUSTER_NAME }} \
           --overwrite-existing
     - name: Setup Terraform
@@ -32,6 +32,11 @@ jobs:
     - name: Get Infrastructure Details
       id: infra
       run: |
+        # Setup Terraform backend
+        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
+          echo "Setting up Terraform backend..."
+          ./scripts/setup-terraform-backend.sh
+        fi
         cd terraform
         terraform init
         ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
@@ -43,6 +48,88 @@ jobs:
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+    - name: 🔍 Pre-Migration Database Connection Tests
+      timeout-minutes: 2
+      run: |
+        echo "=== 🔍 PRE-MIGRATION DATABASE CONNECTION TESTS ==="
+        echo "Testing database connectivity before starting migration..."
+        export DB_HOST="${{ steps.infra.outputs.postgres-host }}"
+        export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        echo "Database Host: $DB_HOST"
+        echo "Testing from GitHub Actions runner..."
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+        chmod +x ./scripts/test-db-connection.sh
+        ./scripts/test-db-connection.sh "$DB_HOST" "$DB_PASSWORD"
+        echo "✅ Database connection pre-checks completed successfully!"
+    - name: 🧪 Test Database Connection from Kubernetes
+      timeout-minutes: 2
+      run: |
+        echo "=== 🧪 TESTING DATABASE CONNECTION FROM KUBERNETES ==="
+        kubectl run db-connection-test \
+          --image=postgres:15-alpine \
+          --rm -i --restart=Never \
+          --namespace=zoneapi \
+          --overrides='{
+            "spec": {
+              "containers": [{
+                "name": "db-test",
+                "image": "postgres:15-alpine",
+                "env": [{
+                  "name": "PGPASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "zoneapi-db-secret",
+                      "key": "password"
+                    }
+                  }
+                }],
+                "command": ["psql"],
+                "args": [
+                  "-h", "${{ steps.infra.outputs.postgres-host }}",
+                  "-U", "postgres",
+                  "-d", "zone",
+                  "-c", "SELECT version(); SELECT current_database(); SELECT current_user;"
+                ]
+              }]
+            }
+          }' \
+          --timeout=120s
+        echo "✅ Kubernetes-to-Database connection test completed!"
+    - name: 📊 Pre-Migration Database State Check
+      timeout-minutes: 2
+      run: |
+        echo "=== 📊 PRE-MIGRATION DATABASE STATE CHECK ==="
+        kubectl run db-state-check \
+          --image=postgres:15-alpine \
+          --rm -i --restart=Never \
+          --namespace=zoneapi \
+          --overrides='{
+            "spec": {
+              "containers": [{
+                "name": "db-state",
+                "image": "postgres:15-alpine",
+                "env": [{
+                  "name": "PGPASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "zoneapi-db-secret",
+                      "key": "password"
+                    }
+                  }
+                }],
+                "command": ["psql"],
+                "args": [
+                  "-h", "${{ steps.infra.outputs.postgres-host }}",
+                  "-U", "postgres",
+                  "-d", "zone",
+                  "-c", "\\dt; SELECT table_name FROM information_schema.tables WHERE table_schema = '\''public'\''; SELECT COUNT(*) as migration_history FROM __EFMigrationsHistory;"
+                ]
+              }]
+            }
+          }' \
+          --timeout=120s || echo "⚠️  Migration history table may not exist yet (first run)"
+        echo "✅ Database state check completed!"
     - name: Run Database Migration (efbundle Approach) with Enhanced Monitoring
       timeout-minutes: 2
       run: |
@@ -70,4 +157,107 @@ jobs:
           echo "❌ Migration script failed!"
           exit 1
         fi
-        kill $MONITOR_PID 2>/dev/null || true 
+        kill $MONITOR_PID 2>/dev/null || true
+    - name: 🔍 Detailed Migration Job Analysis
+      if: always()
+      run: |
+        echo "=== 🔍 DETAILED MIGRATION JOB ANALYSIS ==="
+        echo "=== Migration Jobs ==="
+        kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o wide
+        echo "=== Migration Pods ==="
+        kubectl get pods -n zoneapi -l app.kubernetes.io/component=migration -o wide
+        echo "=== Recent Migration Events ==="
+        kubectl get events --namespace=zoneapi --field-selector involvedObject.kind=Job --sort-by='.lastTimestamp' | tail -20
+        latest_job=$(kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$latest_job" ]; then
+          echo "=== Latest Migration Job Details: $latest_job ==="
+          kubectl describe job "$latest_job" -n zoneapi
+          echo "=== Migration Job Logs ==="
+          kubectl logs -l job-name="$latest_job" -n zoneapi --tail=200 || echo "No logs available"
+          job_status=$(kubectl get job "$latest_job" -n zoneapi -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "Unknown")
+          echo "Migration Job Status: $job_status"
+          if [ "$job_status" = "Complete" ]; then
+            echo "✅ Migration completed successfully!"
+          elif [ "$job_status" = "Failed" ]; then
+            echo "❌ Migration failed!"
+            failed_pods=$(kubectl get pods -n zoneapi -l job-name="$latest_job" --field-selector=status.phase=Failed -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+            for pod in $failed_pods; do
+              echo "=== Failed Pod Logs: $pod ==="
+              kubectl logs "$pod" -n zoneapi || echo "Cannot retrieve logs for $pod"
+            done
+          fi
+        else
+          echo "⚠️  No migration job found"
+        fi
+    - name: 📊 Post-Migration Database Verification
+      timeout-minutes: 2
+      run: |
+        echo "=== 📊 POST-MIGRATION DATABASE VERIFICATION ==="
+        kubectl run post-migration-check \
+          --image=postgres:15-alpine \
+          --rm -i --restart=Never \
+          --namespace=zoneapi \
+          --overrides='{
+            "spec": {
+              "containers": [{
+                "name": "post-migration",
+                "image": "postgres:15-alpine",
+                "env": [{
+                  "name": "PGPASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "zoneapi-db-secret",
+                      "key": "password"
+                    }
+                  }
+                }],
+                "command": ["psql"],
+                "args": [
+                  "-h", "${{ steps.infra.outputs.postgres-host }}",
+                  "-U", "postgres",
+                  "-d", "zone",
+                  "-c", "\\dt; SELECT COUNT(*) as total_migrations FROM __EFMigrationsHistory; SELECT migration_id, product_version FROM __EFMigrationsHistory ORDER BY migration_id;"
+                ]
+              }]
+            }
+          }' \
+          --timeout=120s
+        echo "✅ Post-migration database verification completed!"
+    - name: 🛠️ Comprehensive Migration Troubleshooting
+      if: failure()
+      run: |
+        echo "=== 🛠️ COMPREHENSIVE MIGRATION TROUBLESHOOTING ==="
+        chmod +x ./scripts/debug-migration-status.sh
+        ./scripts/debug-migration-status.sh zoneapi || echo "Debug script completed with issues"
+        echo ""
+        echo "=== 🔍 ADDITIONAL CLUSTER DIAGNOSTICS ==="
+        echo "=== Resource Usage ==="
+        kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+        kubectl top pods -n zoneapi 2>/dev/null || echo "Pod metrics not available"
+        echo "=== Network Diagnostics ==="
+        kubectl get networkpolicies -n zoneapi 2>/dev/null || echo "No network policies found"
+        kubectl get ingress -n zoneapi -o wide 2>/dev/null || echo "No ingress found"
+        echo "=== Storage Diagnostics ==="
+        kubectl get pv,pvc -n zoneapi 2>/dev/null || echo "No persistent volumes found"
+        kubectl describe quota -n zoneapi 2>/dev/null || echo "No resource quotas found"
+        echo "=== Extended Event History ==="
+        kubectl get events -n zoneapi --sort-by='.lastTimestamp' | tail -50
+        chmod +x ./scripts/debug-health-checks.sh
+        ./scripts/debug-health-checks.sh || echo "Health check script completed with issues"
+    - name: Verify Migration Success
+      if: always()
+      run: |
+        echo "=== FINAL MIGRATION STATUS SUMMARY ==="
+        completed_jobs=$(kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o jsonpath='{.items[?(@.status.conditions[0].type=="Complete")].metadata.name}' 2>/dev/null || echo "")
+        failed_jobs=$(kubectl get jobs -n zoneapi -l app.kubernetes.io/component=migration -o jsonpath='{.items[?(@.status.conditions[0].type=="Failed")].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$completed_jobs" ]; then
+          echo "✅ Successfully completed migration jobs: $completed_jobs"
+        fi
+        if [ -n "$failed_jobs" ]; then
+          echo "❌ Failed migration jobs: $failed_jobs"
+          exit 1
+        fi
+        if [ -z "$completed_jobs" ] && [ -z "$failed_jobs" ]; then
+          echo "⚠️  No migration jobs found or jobs still running"
+          exit 1
+        fi 
