@@ -273,9 +273,6 @@ run_migration_with_helm() {
     return 1
   fi
 
-  # Force update the database secret with the current password
-  update_database_secret "$db_password"
-
   log_with_timestamp "INFO" "Migration configuration validated"
   log_with_timestamp "DEBUG" "ACR Server: $acr_login_server"
   log_with_timestamp "DEBUG" "Database Host: $database_host"
