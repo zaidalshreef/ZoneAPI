@@ -206,6 +206,8 @@ run_migration_with_helm() {
   log_with_timestamp "INFO" "Deploying migration job via Helm template"
 
   if helm template zoneapi-migration ./charts/zoneapi \
+    --namespace "$NAMESPACE" \
+    --create-namespace \
     --set migration.enabled=true \
     --set image.repository="$acr_login_server/zoneapi" \
     --set image.tag="$IMAGE_TAG" \
