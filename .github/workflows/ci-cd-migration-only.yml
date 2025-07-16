@@ -1,0 +1,73 @@
+name: Migration Only Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master, develop ]
+
+env:
+  IMAGE_NAME: zoneapi
+  HELM_VERSION: 3.12.0
+
+jobs:
+  run-migration:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials \
+          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --name ${{ secrets.AKS_CLUSTER_NAME }} \
+          --overwrite-existing
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
+        terraform_wrapper: false
+    - name: Get Infrastructure Details
+      id: infra
+      run: |
+        cd terraform
+        terraform init
+        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+        POSTGRES_HOST=$(terraform output -raw postgres_server_fqdn)
+        echo "acr-login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+        echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+    - name: Run Database Migration (efbundle Approach) with Enhanced Monitoring
+      timeout-minutes: 2
+      run: |
+        echo "=== 🚀 RUNNING DATABASE MIGRATION (EFBUNDLE APPROACH) ==="
+        export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
+        export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
+        export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        export IMAGE_TAG="latest"
+        export NAMESPACE="zoneapi"
+        export TIMEOUT="120"
+        echo "Migration Configuration:"
+        echo "- ACR: $ACR_LOGIN_SERVER"
+        echo "- Database Host: $DATABASE_HOST"
+        echo "- Image Tag: $IMAGE_TAG"
+        echo "- Namespace: $NAMESPACE"
+        echo "- Timeout: $TIMEOUT seconds"
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        chmod +x ./scripts/run-migration.sh
+        ./scripts/monitor-pipeline.sh &
+        MONITOR_PID=$!
+        echo "🏃‍♂️ Starting migration process..."
+        if ./scripts/run-migration.sh; then
+          echo "✅ Migration script completed successfully!"
+        else
+          echo "❌ Migration script failed!"
+          exit 1
+        fi
+        kill $MONITOR_PID 2>/dev/null || true 
