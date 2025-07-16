@@ -74,13 +74,21 @@ spec:
               value: "http://+:8080"
             - name: DOTNET_BUNDLE_EXTRACT_BASE_DIR
               value: "/tmp"
-            - name: ConnectionStrings__DefaultConnection
-              value: "Host={{ .Values.database.host }};Port={{ .Values.database.port }};Database={{ .Values.database.name }};Username={{ .Values.database.user }};Password=$DB_PASSWORD;CommandTimeout=300;Timeout=60;"
+            - name: DB_HOST
+              value: "{{ .Values.database.host }}"
+            - name: DB_PORT
+              value: "{{ .Values.database.port }}"
+            - name: DB_NAME
+              value: "{{ .Values.database.name }}"
+            - name: DB_USER
+              value: "{{ .Values.database.user }}"
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: zoneapi-db-secret
                   key: password
+            - name: ConnectionStrings__PostgreSQLConnection
+              value: "Host=$(DB_HOST);Port=$(DB_PORT);Database=$(DB_NAME);Username=$(DB_USER);Password=$(DB_PASSWORD);CommandTimeout=300;Timeout=60;"
           volumeMounts:
             - name: tmp
               mountPath: /tmp
