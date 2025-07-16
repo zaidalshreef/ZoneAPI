@@ -852,6 +852,19 @@ jobs:
         
         echo ""
         echo "🎉 All deployment validation tests passed!"
+        
+        # Show external endpoint
+        external_ip=$(kubectl get service zoneapi -n zoneapi -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+        if [ "$external_ip" != "pending" ] && [ -n "$external_ip" ]; then
+          echo ""
+          echo "🌐 Application is accessible at:"
+          echo "   Health Check: http://$external_ip:8080/health"
+          echo "   Doctors API:  http://$external_ip:8080/api/doctors"
+          echo "   Patients API: http://$external_ip:8080/api/patients"
+        else
+          echo ""
+          echo "⏳ LoadBalancer IP is still provisioning..."
+        fi
     
     - name: 🧪 Run Comprehensive Deployment Validation
       run: |

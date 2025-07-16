@@ -34,7 +34,7 @@ securityContext:
   runAsUser: 10001  # Match Dockerfile UID
 
 service:
-  type: ClusterIP
+  type: LoadBalancer  # Azure automatically provisions external IP
   port: 8080
   targetPort: 8080
 
@@ -50,10 +50,10 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
-  tls:
-    - secretName: zoneapi-tls
-      hosts:
-        - zoneapi.local
+  # tls:
+  #   - secretName: zoneapi-tls
+  #     hosts:
+  #       - zoneapi.local
 
 resources:
   limits:
