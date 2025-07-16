@@ -16,8 +16,6 @@ on:
 
 env:
   IMAGE_NAME: zoneapi
-  AZURE_RESOURCE_GROUP: rg-zoneapi
-  AKS_CLUSTER_NAME: aks-zoneapi
 
 jobs:
   manual-deploy-test:
@@ -81,11 +79,27 @@ jobs:
           exit 1
         fi
         
+        if ! RESOURCE_GROUP=$(terraform output -raw resource_group_name 2>/dev/null); then
+          echo "❌ Failed to get resource group name from Terraform state"
+          terraform output
+          exit 1
+        fi
+        
+        if ! AKS_CLUSTER=$(terraform output -raw aks_cluster_name 2>/dev/null); then
+          echo "❌ Failed to get AKS cluster name from Terraform state"
+          terraform output
+          exit 1
+        fi
+        
         echo "acr-registry=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
         echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
+        echo "resource-group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
+        echo "aks-cluster=$AKS_CLUSTER" >> $GITHUB_OUTPUT
         
         echo "✅ ACR Registry: $ACR_LOGIN_SERVER"
         echo "✅ PostgreSQL Host: $POSTGRES_HOST"
+        echo "✅ Resource Group: $RESOURCE_GROUP"
+        echo "✅ AKS Cluster: $AKS_CLUSTER"
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
@@ -94,7 +108,7 @@ jobs:
 
     - name: Connect to AKS
       run: |
-        az aks get-credentials --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AKS_CLUSTER_NAME }} --overwrite-existing
+        az aks get-credentials --resource-group ${{ steps.infra-info.outputs.resource-group }} --name ${{ steps.infra-info.outputs.aks-cluster }} --overwrite-existing
         kubectl config current-context
 
     - name: Check Secrets and Current State
