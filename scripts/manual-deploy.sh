@@ -102,19 +102,46 @@ prepare_deployment_files() {
     local temp_dir="./manual-deploy/temp"
     mkdir -p "$temp_dir"
 
+    # Check if manual-deploy files exist
+    if [ ! -d "./manual-deploy" ]; then
+        print_error "manual-deploy directory not found in current directory: $(pwd)"
+        print_status "Available directories:"
+        ls -la
+        exit 1
+    fi
+
+    print_status "Looking for deployment files in: $(pwd)/manual-deploy/"
+    ls -la ./manual-deploy/
+
     # Copy files and replace placeholders
+    local files_found=0
     for file in ./manual-deploy/0*.yaml; do
-        local filename=$(basename "$file")
-        print_status "Preparing $filename..."
+        if [ -f "$file" ]; then
+            local filename=$(basename "$file")
+            print_status "Preparing $filename..."
 
-        # Replace placeholders with actual values
-        sed -e "s|ACR_REGISTRY_PLACEHOLDER|$ACR_REGISTRY|g" \
-            -e "s|DB_HOST_PLACEHOLDER|$DB_HOST|g" \
-            "$file" >"$temp_dir/$filename"
+            # Replace placeholders with actual values
+            sed -e "s|ACR_REGISTRY_PLACEHOLDER|$ACR_REGISTRY|g" \
+                -e "s|DB_HOST_PLACEHOLDER|$DB_HOST|g" \
+                "$file" >"$temp_dir/$filename"
 
-        print_success "Prepared $temp_dir/$filename"
+            if [ -f "$temp_dir/$filename" ]; then
+                print_success "Prepared $temp_dir/$filename"
+                ((files_found++))
+            else
+                print_error "Failed to create $temp_dir/$filename"
+            fi
+        fi
     done
 
+    if [ $files_found -eq 0 ]; then
+        print_error "No deployment files found in ./manual-deploy/"
+        print_status "Current directory: $(pwd)"
+        print_status "Looking for files matching: ./manual-deploy/0*.yaml"
+        exit 1
+    fi
+
+    print_success "Prepared $files_found deployment files"
     echo "$temp_dir"
 }
 
@@ -138,20 +165,48 @@ deploy_resources() {
     local temp_dir="$1"
 
     print_status "Deploying resources to Kubernetes..."
+    print_status "Deployment directory: $temp_dir"
+    
+    # List what's actually in the temp directory
+    if [ -d "$temp_dir" ]; then
+        print_status "Files in temp directory:"
+        ls -la "$temp_dir"
+    else
+        print_error "Temp directory $temp_dir does not exist!"
+        exit 1
+    fi
 
     # Deploy in order: secret, migration job, deployment, service
-    local files=("01-secret.yaml" "02-migration-job.yaml" "03-deployment.yaml" "04-service.yaml")
+    local files=("02-migration-job.yaml" "03-deployment.yaml" "04-service.yaml")
+    # Note: Skipping 01-secret.yaml since we create the secret separately
 
+    local deployed_count=0
     for file in "${files[@]}"; do
         local filepath="$temp_dir/$file"
         if [[ -f "$filepath" ]]; then
             print_status "Deploying $file..."
-            kubectl apply -f "$filepath"
-            print_success "Applied $file"
+            print_status "File content preview:"
+            head -10 "$filepath"
+            echo "..."
+            
+            if kubectl apply -f "$filepath"; then
+                print_success "Applied $file"
+                ((deployed_count++))
+            else
+                print_error "Failed to apply $file"
+                print_status "Full file content:"
+                cat "$filepath"
+                exit 1
+            fi
         else
-            print_warning "File $filepath not found, skipping..."
+            print_error "File $filepath not found!"
+            print_status "Expected files in $temp_dir:"
+            find "$temp_dir" -name "*.yaml" -type f || echo "No YAML files found"
+            exit 1
         fi
     done
+    
+    print_success "Deployed $deployed_count resources successfully"
 }
 
 # Function to monitor migration job
