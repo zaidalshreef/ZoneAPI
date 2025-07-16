@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Always run from repo root (where .git exists)
+if [ -d "$(dirname "$0")/../.git" ]; then
+    cd "$(dirname "$0")/.."
+fi
+
 # Manual deployment script for ZoneAPI without Helm
 # This script helps troubleshoot Helm issues by deploying directly with kubectl
 
