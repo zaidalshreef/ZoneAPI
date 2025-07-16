@@ -1,0 +1,263 @@
+name: Manual Deployment Test (No Helm)
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_before_deploy:
+        description: 'Clean existing resources before deployment'
+        required: false
+        default: true
+        type: boolean
+      check_secrets_only:
+        description: 'Only check secrets and cluster state (no deployment)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  IMAGE_NAME: zoneapi
+  AZURE_RESOURCE_GROUP: rg-zoneapi
+  AKS_CLUSTER_NAME: aks-zoneapi
+
+jobs:
+  manual-deploy-test:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Get Infrastructure Info
+      id: infra-info
+      run: |
+        # Setup Terraform backend
+        if ! az storage account show --name tfstatezoneapi --resource-group rg-terraform-state >/dev/null 2>&1; then
+          echo "Setting up Terraform backend..."
+          ./scripts/setup-terraform-backend.sh
+        fi
+        
+        cd terraform
+        terraform init
+        
+        # Get outputs
+        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
+        POSTGRES_HOST=$(terraform output -raw postgres_host)
+        
+        echo "acr-registry=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+        echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
+        
+        echo "ACR Registry: $ACR_LOGIN_SERVER"
+        echo "PostgreSQL Host: $POSTGRES_HOST"
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    - name: Connect to AKS
+      run: |
+        az aks get-credentials --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AKS_CLUSTER_NAME }} --overwrite-existing
+        kubectl config current-context
+
+    - name: Check Secrets and Current State
+      run: |
+        echo "=== CHECKING KUBERNETES SECRETS AND CURRENT STATE ==="
+        
+        # Set environment variables for the script
+        export ACR_REGISTRY="${{ steps.infra-info.outputs.acr-registry }}"
+        export DB_HOST="${{ steps.infra-info.outputs.postgres-host }}"
+        export POSTGRES_ADMIN_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        
+        # Run check command
+        ./scripts/manual-deploy.sh check
+
+    - name: Clean Existing Resources
+      if: ${{ inputs.clean_before_deploy == true && inputs.check_secrets_only == false }}
+      run: |
+        echo "=== CLEANING EXISTING RESOURCES ==="
+        
+        # Remove Helm deployment if it exists
+        if helm list -n zoneapi | grep -q zoneapi; then
+          echo "Removing existing Helm deployment..."
+          helm uninstall zoneapi -n zoneapi
+        fi
+        
+        # Clean manual deployment resources
+        ./scripts/manual-deploy.sh clean
+        
+        # Wait a bit for cleanup
+        sleep 10
+
+    - name: Check Docker Image Availability
+      if: ${{ inputs.check_secrets_only == false }}
+      run: |
+        echo "=== CHECKING DOCKER IMAGE AVAILABILITY ==="
+        
+        # Login to ACR
+        az acr login --name $(echo "${{ steps.infra-info.outputs.acr-registry }}" | cut -d'.' -f1)
+        
+        # Check if latest image exists
+        IMAGE_REPO="${{ steps.infra-info.outputs.acr-registry }}/${{ env.IMAGE_NAME }}"
+        
+        echo "Checking for image: $IMAGE_REPO:latest"
+        
+        if az acr repository show-manifests --name $(echo "${{ steps.infra-info.outputs.acr-registry }}" | cut -d'.' -f1) --repository ${{ env.IMAGE_NAME }} --query "[?tags!=null && contains(tags, 'latest')]" -o tsv; then
+          echo "✓ Latest image found in registry"
+        else
+          echo "❌ Latest image not found in registry"
+          echo "Available tags:"
+          az acr repository show-tags --name $(echo "${{ steps.infra-info.outputs.acr-registry }}" | cut -d'.' -f1) --repository ${{ env.IMAGE_NAME }} --output table || echo "No tags found"
+          exit 1
+        fi
+
+    - name: Deploy with Manual Method
+      if: ${{ inputs.check_secrets_only == false }}
+      timeout-minutes: 25
+      run: |
+        echo "=== MANUAL DEPLOYMENT WITHOUT HELM ==="
+        
+        # Set environment variables for the script
+        export ACR_REGISTRY="${{ steps.infra-info.outputs.acr-registry }}"
+        export DB_HOST="${{ steps.infra-info.outputs.postgres-host }}"
+        export POSTGRES_ADMIN_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        
+        # Run manual deployment
+        ./scripts/manual-deploy.sh deploy
+
+    - name: Test Application Health
+      if: ${{ inputs.check_secrets_only == false }}
+      timeout-minutes: 5
+      run: |
+        echo "=== TESTING APPLICATION HEALTH ==="
+        
+        # Wait for service to be ready
+        kubectl wait --for=condition=available --timeout=300s deployment/zoneapi
+        
+        # Port forward and test health endpoint
+        kubectl port-forward service/zoneapi 8080:8080 &
+        PF_PID=$!
+        
+        # Wait for port forward to be ready
+        sleep 5
+        
+        # Test health endpoint
+        MAX_ATTEMPTS=10
+        ATTEMPT=1
+        
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+          echo "Testing health endpoint (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+          
+          if curl -f -s http://localhost:8080/health; then
+            echo "✓ Health check passed!"
+            break
+          else
+            echo "❌ Health check failed, retrying in 10 seconds..."
+            sleep 10
+            ((ATTEMPT++))
+          fi
+        done
+        
+        # Cleanup port forward
+        kill $PF_PID || true
+        
+        if [ $ATTEMPT -gt $MAX_ATTEMPTS ]; then
+          echo "❌ Health check failed after $MAX_ATTEMPTS attempts"
+          
+          echo ""
+          echo "=== APPLICATION LOGS ==="
+          kubectl logs -l app.kubernetes.io/name=zoneapi --tail=50
+          
+          echo ""
+          echo "=== POD STATUS ==="
+          kubectl describe pods -l app.kubernetes.io/name=zoneapi
+          
+          exit 1
+        fi
+
+    - name: Run API Tests
+      if: ${{ inputs.check_secrets_only == false }}
+      timeout-minutes: 5
+      run: |
+        echo "=== RUNNING API TESTS ==="
+        
+        # Port forward for testing
+        kubectl port-forward service/zoneapi 8080:8080 &
+        PF_PID=$!
+        sleep 5
+        
+        # Test various endpoints
+        echo "Testing /health endpoint..."
+        curl -f http://localhost:8080/health
+        
+        echo ""
+        echo "Testing /api/doctors endpoint..."
+        curl -f http://localhost:8080/api/doctors
+        
+        echo ""
+        echo "Testing /api/patients endpoint..."
+        curl -f http://localhost:8080/api/patients
+        
+        echo ""
+        echo "Testing /api/appointments endpoint..."
+        curl -f http://localhost:8080/api/appointments
+        
+        # Cleanup
+        kill $PF_PID || true
+        
+        echo "✓ All API tests passed!"
+
+    - name: Deployment Summary
+      if: always()
+      run: |
+        echo "=== DEPLOYMENT SUMMARY ==="
+        echo "Manual deployment test completed"
+        echo ""
+        
+        if [ "${{ inputs.check_secrets_only }}" == "true" ]; then
+          echo "Mode: Secrets check only"
+        else
+          echo "Mode: Full deployment test"
+          
+          echo ""
+          echo "=== FINAL RESOURCE STATUS ==="
+          kubectl get all -l app.kubernetes.io/name=zoneapi -o wide
+          
+          echo ""
+          echo "=== SECRETS STATUS ==="
+          kubectl get secrets zoneapi-db-secret -o yaml
+        fi
+        
+        echo ""
+        echo "=== LOGS ==="
+        if kubectl get pods -l app.kubernetes.io/name=zoneapi -o name | head -1; then
+          kubectl logs -l app.kubernetes.io/name=zoneapi --tail=20
+        fi
+
+    - name: Cleanup on Failure
+      if: failure()
+      run: |
+        echo "=== CLEANUP ON FAILURE ==="
+        echo "Gathering debugging information..."
+        
+        echo ""
+        echo "=== ALL RESOURCES ==="
+        kubectl get all -o wide
+        
+        echo ""
+        echo "=== EVENTS ==="
+        kubectl get events --sort-by=.metadata.creationTimestamp
+        
+        echo ""
+        echo "=== DESCRIBING FAILED RESOURCES ==="
+        kubectl describe pods -l app.kubernetes.io/name=zoneapi || true
+        kubectl describe deployment zoneapi || true
+        kubectl describe job zoneapi-migration-latest || true
+        
+        # Optional: Clean up failed deployment
+        # ./scripts/manual-deploy.sh clean 

@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zoneapi
+  labels:
+    app.kubernetes.io/name: zoneapi
+    app.kubernetes.io/instance: zoneapi
+    app.kubernetes.io/version: "latest"
+    app.kubernetes.io/component: application
+    app.kubernetes.io/part-of: zoneapi
+    app.kubernetes.io/managed-by: manual
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zoneapi
+      app.kubernetes.io/instance: zoneapi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zoneapi
+        app.kubernetes.io/instance: zoneapi
+    spec:
+      securityContext:
+        fsGroup: 10001
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: zoneapi
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 10001
+          image: "ACR_REGISTRY_PLACEHOLDER/zoneapi:latest"  # Will be replaced by CI/CD
+          imagePullPolicy: IfNotPresent
+          workingDir: /out
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 6
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            timeoutSeconds: 20
+            failureThreshold: 5
+            successThreshold: 1
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Kubernetes"
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+            - name: ConnectionStrings__PostgreSQLConnection
+              value: "Host=DB_HOST_PLACEHOLDER;Port=5432;Database=zone;Username=postgres;Password=$DB_PASSWORD;CommandTimeout=300;Timeout=60;"
+            - name: Logging__LogLevel__Default
+              value: "Information"
+            - name: Logging__LogLevel__Microsoft
+              value: "Warning"
+            - name: Logging__LogLevel__System
+              value: "Warning"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zoneapi-db-secret
+                  key: password
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m" 
