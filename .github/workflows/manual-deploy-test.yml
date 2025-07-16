@@ -168,6 +168,7 @@ jobs:
       if: ${{ inputs.check_secrets_only == false }}
       timeout-minutes: 25
       run: |
+        cd $GITHUB_WORKSPACE
         echo "=== MANUAL DEPLOYMENT WITHOUT HELM ==="
         echo "Registry: $ACR_REGISTRY"
         echo "Database Host: $DB_HOST"

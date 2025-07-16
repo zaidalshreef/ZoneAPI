@@ -1,9 +1,7 @@
 #!/bin/bash
 
 # Always run from repo root (where .git exists)
-if [ -d "$(dirname "$0")/../.git" ]; then
-    cd "$(dirname "$0")/.."
-fi
+cd "$(git rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$0")/..")"
 
 # Manual deployment script for ZoneAPI without Helm
 # This script helps troubleshoot Helm issues by deploying directly with kubectl
