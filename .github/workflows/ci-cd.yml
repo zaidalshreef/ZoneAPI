@@ -549,7 +549,7 @@ jobs:
         echo "✅ Database state check completed!"
 
     - name: 🚀 Run Database Migration (efbundle Approach) with Enhanced Monitoring
-      timeout-minutes: 10
+      timeout-minutes: 2
       run: |
         echo "=== 🚀 RUNNING DATABASE MIGRATION (EFBUNDLE APPROACH) ==="
         
@@ -559,7 +559,7 @@ jobs:
         export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
         export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         export NAMESPACE="zoneapi"
-        export TIMEOUT="900"  # Increased timeout for better monitoring
+        export TIMEOUT="60"   # 1 minute timeout - migrations should be fast
         
         # Debug: Check if environment variables are set
         echo "=== Environment Variable Debug ==="

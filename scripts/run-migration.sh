@@ -8,7 +8,7 @@ set -e
 
 # Configuration
 NAMESPACE="${NAMESPACE:-zoneapi}"
-TIMEOUT="${TIMEOUT:-600}"
+TIMEOUT="${TIMEOUT:-60}"  # Reduced from 600 to 60 seconds (1 minute)
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Colors for output
@@ -64,8 +64,20 @@ monitor_migration_realtime() {
   log_with_timestamp "INFO" "Starting real-time monitoring of migration job: $job_name"
 
   while [ $counter -lt $timeout ]; do
-    # Get job status
-    local status=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "NotFound")
+    # Get job status - check for Complete condition with True status
+    local job_complete=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "False")
+    local job_failed=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || echo "False")
+    local status=""
+    
+    # Determine overall status
+    if [ "$job_complete" = "True" ]; then
+      status="Complete"
+    elif [ "$job_failed" = "True" ]; then
+      status="Failed"
+    else
+      # Fallback to checking first condition type for other statuses
+      status=$(kubectl get job "$job_name" -n "$NAMESPACE" -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "NotFound")
+    fi
 
     # Get pod status and count
     local pod_count=$(kubectl get pods -n "$NAMESPACE" -l job-name="$job_name" --no-headers 2>/dev/null | wc -l)

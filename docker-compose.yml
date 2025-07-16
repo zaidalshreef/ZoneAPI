@@ -63,7 +63,7 @@ services:
       Logging__LogLevel__Microsoft: Warning
       Logging__LogLevel__System: Warning
     ports:
-      - "8080:8080"
+      - "80:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
