@@ -255,6 +255,20 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
     
+    - name: 🧹 Clean Up Old Migration Jobs (Start with Clean Environment)
+      timeout-minutes: 1
+      run: |
+        echo "=== 🧹 CLEANING UP OLD MIGRATION JOBS ==="
+        echo "Removing all previous migration jobs and pods for a clean start..."
+        
+        # Make cleanup script executable
+        chmod +x ./scripts/cleanup-migration-jobs.sh
+        
+        # Run cleanup with force option to ensure everything is removed
+        ./scripts/cleanup-migration-jobs.sh zoneapi true
+        
+        echo "✅ Environment cleaned successfully!"
+
     - name: 🔍 Pre-Migration Database Connection Tests
       timeout-minutes: 1
       run: |
