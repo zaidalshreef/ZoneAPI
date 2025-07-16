@@ -3,6 +3,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "zoneapi.fullname" . }}-migration-{{ .Values.image.tag | default .Chart.AppVersion | replace "." "-" | replace ":" "-" }}-{{ now | unixEpoch }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "zoneapi.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
