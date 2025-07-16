@@ -99,23 +99,30 @@ check_secrets() {
 prepare_deployment_files() {
     print_status "Preparing deployment files with current environment..."
 
-    local temp_dir="./manual-deploy/temp"
+    # Use absolute paths to avoid path resolution issues
+    local base_dir="$(pwd)"
+    local temp_dir="$base_dir/manual-deploy/temp"
+
+    print_status "Base directory: $base_dir"
+    print_status "Temp directory: $temp_dir"
+
     mkdir -p "$temp_dir"
 
     # Check if manual-deploy files exist
-    if [ ! -d "./manual-deploy" ]; then
-        print_error "manual-deploy directory not found in current directory: $(pwd)"
-        print_status "Available directories:"
-        ls -la
+    local source_dir="$base_dir/manual-deploy"
+    if [ ! -d "$source_dir" ]; then
+        print_error "manual-deploy directory not found: $source_dir"
+        print_status "Available directories in $base_dir:"
+        ls -la "$base_dir"
         exit 1
     fi
 
-    print_status "Looking for deployment files in: $(pwd)/manual-deploy/"
-    ls -la ./manual-deploy/
+    print_status "Looking for deployment files in: $source_dir"
+    ls -la "$source_dir"
 
     # Copy files and replace placeholders
     local files_found=0
-    for file in ./manual-deploy/0*.yaml; do
+    for file in "$source_dir"/0*.yaml; do
         if [ -f "$file" ]; then
             local filename=$(basename "$file")
             print_status "Preparing $filename..."
@@ -135,9 +142,9 @@ prepare_deployment_files() {
     done
 
     if [ $files_found -eq 0 ]; then
-        print_error "No deployment files found in ./manual-deploy/"
-        print_status "Current directory: $(pwd)"
-        print_status "Looking for files matching: ./manual-deploy/0*.yaml"
+        print_error "No deployment files found in $source_dir"
+        print_status "Current directory: $base_dir"
+        print_status "Looking for files matching: $source_dir/0*.yaml"
         exit 1
     fi
 
@@ -166,7 +173,7 @@ deploy_resources() {
 
     print_status "Deploying resources to Kubernetes..."
     print_status "Deployment directory: $temp_dir"
-    
+
     # List what's actually in the temp directory
     if [ -d "$temp_dir" ]; then
         print_status "Files in temp directory:"
@@ -188,7 +195,7 @@ deploy_resources() {
             print_status "File content preview:"
             head -10 "$filepath"
             echo "..."
-            
+
             if kubectl apply -f "$filepath"; then
                 print_success "Applied $file"
                 ((deployed_count++))
@@ -205,7 +212,7 @@ deploy_resources() {
             exit 1
         fi
     done
-    
+
     print_success "Deployed $deployed_count resources successfully"
 }
 
@@ -311,7 +318,9 @@ check_deployment() {
 # Function to cleanup temp files
 cleanup() {
     print_status "Cleaning up temporary files..."
-    rm -rf ./manual-deploy/temp
+    local temp_dir="$(pwd)/manual-deploy/temp"
+    print_status "Removing: $temp_dir"
+    rm -rf "$temp_dir"
     print_success "Cleanup completed"
 }
 
@@ -327,11 +336,13 @@ main() {
 
     # Prepare files
     local temp_dir=$(prepare_deployment_files)
+    print_status "Received temp directory path: '$temp_dir'"
 
     # Update secret with correct password
     update_secret
 
     # Deploy resources
+    print_status "Passing temp directory to deploy_resources: '$temp_dir'"
     deploy_resources "$temp_dir"
 
     # Monitor migration
