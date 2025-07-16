@@ -43,8 +43,8 @@ ingress:
   className: "nginx"
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
   hosts:
     - host: zoneapi.local
       paths:
@@ -84,34 +84,34 @@ database:
   user: "postgres"
   password: ""  # Will be set by CI/CD via secret
 
-# Health check configuration - Updated for .NET 7.0 container
+# Health check configuration - Optimized based on actual performance
 healthCheck:
   enabled: true
   path: /health
-  initialDelaySeconds: 20  # Slightly more time for .NET 7.0 startup
+  initialDelaySeconds: 15  # App starts quickly with correct config
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 3
   successThreshold: 1
 
-# Liveness probe (when to restart container) - Updated for stability
+# Liveness probe (when to restart container) - Optimized for quick startup
 livenessProbe:
   enabled: true
   path: /health
-  initialDelaySeconds: 90  # Give app more time to start and connect to DB
+  initialDelaySeconds: 30  # Reduced since app starts in ~10 seconds
   periodSeconds: 30
-  timeoutSeconds: 30  # Increased timeout for slower responses
-  failureThreshold: 6  # Be more forgiving during startup
+  timeoutSeconds: 15  # Reasonable timeout for health checks
+  failureThreshold: 3  # Standard failure threshold
   successThreshold: 1
 
-# Readiness probe (when to start receiving traffic) - Updated for .NET 7.0
+# Readiness probe (when to start receiving traffic) - Optimized startup
 readinessProbe:
   enabled: true
   path: /health
-  initialDelaySeconds: 45  # Allow proper startup time
-  periodSeconds: 15
-  timeoutSeconds: 20  # Increased timeout for database connectivity checks
-  failureThreshold: 5  # More forgiving failure threshold
+  initialDelaySeconds: 20  # Allow startup and DB connection
+  periodSeconds: 10
+  timeoutSeconds: 10  # Faster timeout for readiness
+  failureThreshold: 3  # Standard failure threshold
   successThreshold: 1
 
 # Deployment strategy

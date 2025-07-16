@@ -691,14 +691,38 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
     
-    - name: Deploy Application (Post-Migration)
+    - name: 🔧 Validate Deployment Configuration
+      run: |
+        echo "=== 🔧 VALIDATING DEPLOYMENT CONFIGURATION ==="
+        
+        # Validate required variables
+        ACR_LOGIN_SERVER="${{ steps.acr-info.outputs.login-server }}"
+        IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
+        POSTGRES_HOST="${{ needs.deploy-infrastructure.outputs.postgres-host }}"
+        DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        
+        echo "Deployment Configuration:"
+        echo "- ACR Login Server: ${ACR_LOGIN_SERVER}"
+        echo "- Image Tag: ${IMAGE_TAG}"
+        echo "- PostgreSQL Host: ${POSTGRES_HOST}"
+        echo "- Password: ${DB_PASSWORD:+[PROVIDED]}"
+        
+        # Validate all required values are present
+        if [ -z "$ACR_LOGIN_SERVER" ] || [ -z "$IMAGE_TAG" ] || [ -z "$POSTGRES_HOST" ] || [ -z "$DB_PASSWORD" ]; then
+          echo "❌ Missing required deployment variables"
+          exit 1
+        fi
+        
+        echo "✅ All deployment variables validated successfully!"
+
+    - name: 🚀 Deploy Application (Post-Migration)
       timeout-minutes: 3
       run: |
-        echo "=== DEPLOYING APPLICATION (POST-MIGRATION) ==="
+        echo "=== 🚀 DEPLOYING APPLICATION (POST-MIGRATION) ==="
         echo "Image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}"
         echo "Database: ${{ needs.deploy-infrastructure.outputs.postgres-host }}"
         
-        # Deploy application with proper health checks enabled
+        # Deploy application with proven working configuration
         helm upgrade --install zoneapi ./charts/zoneapi \
           --namespace zoneapi \
           --create-namespace \
@@ -712,13 +736,15 @@ jobs:
           --set readinessProbe.enabled=true \
           --set replicaCount=1 \
           --force \
-          --wait --timeout=8m \
+          --wait --timeout=3m \
           --debug
+        
+        echo "✅ Application deployed successfully!"
     
-    - name: Verify Deployment
+    - name: 🔍 Verify Deployment & Health
       if: always()
       run: |
-        echo "=== DEPLOYMENT VERIFICATION ==="
+        echo "=== 🔍 DEPLOYMENT VERIFICATION & HEALTH CHECKS ==="
         
         echo "=== Pods Status ==="
         kubectl get pods -n zoneapi -o wide
@@ -726,15 +752,52 @@ jobs:
         echo "=== Services ==="
         kubectl get services -n zoneapi -o wide
         
+        echo "=== Ingress ==="
+        kubectl get ingress -n zoneapi -o wide || echo "No ingress found"
+        
+        # Get the main application pod
+        app_pod=$(kubectl get pods -n zoneapi -l app.kubernetes.io/name=zoneapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        
+        if [ -n "$app_pod" ]; then
+          echo ""
+          echo "=== Application Pod: $app_pod ==="
+          
+          # Check pod status
+          pod_status=$(kubectl get pod "$app_pod" -n zoneapi -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+          ready_status=$(kubectl get pod "$app_pod" -n zoneapi -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+          
+          echo "Pod Status: $pod_status"
+          echo "Ready Status: $ready_status"
+          
+          # Verify environment variables are correctly set
+          echo ""
+          echo "=== Environment Variables Verification ==="
+          kubectl exec -n zoneapi "$app_pod" -- env | grep -E "(ConnectionStrings|DB_)" | sort || echo "Could not retrieve environment variables"
+          
+          # Test health endpoint
+          echo ""
+          echo "=== Health Endpoint Test ==="
+          if kubectl exec -n zoneapi "$app_pod" -- curl -f --max-time 10 http://localhost:8080/health 2>/dev/null; then
+            echo ""
+            echo "✅ Health check passed!"
+          else
+            echo "❌ Health check failed!"
+            
+            echo ""
+            echo "=== Application Logs for Debugging ==="
+            kubectl logs "$app_pod" -n zoneapi --tail=30 || echo "Could not retrieve logs"
+          fi
+        else
+          echo "⚠️ No application pod found"
+        fi
+        
+        echo ""
         echo "=== Recent Events ==="
         kubectl get events -n zoneapi --sort-by='.lastTimestamp' | tail -20
-        
-        echo "=== Pod Logs (if any issues) ==="
-        kubectl logs -l app.kubernetes.io/name=zoneapi -n zoneapi --tail=50 || echo "No pod logs available"
     
-    - name: Health Check Test
+    - name: 🏁 Final Health & API Validation
       run: |
-        echo "=== HEALTH CHECK TEST ==="
+        echo "=== 🏁 FINAL HEALTH & API VALIDATION ==="
         
         # Get pod name
         pod_name=$(kubectl get pods -n zoneapi -l app.kubernetes.io/name=zoneapi -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
@@ -742,14 +805,66 @@ jobs:
         if [ -n "$pod_name" ]; then
           echo "Testing pod: $pod_name"
           
-          # Wait for pod to be ready
-          kubectl wait --for=condition=ready pod/$pod_name -n zoneapi --timeout=120s
-          
-          # Test health endpoint
-          echo "Testing health endpoint..."
-          kubectl exec -n zoneapi $pod_name -- curl -f http://localhost:8080/health
-          
-          echo "✅ Health check passed!"
+          # Wait for pod to be ready with timeout
+          echo "Waiting for pod to be ready..."
+          if kubectl wait --for=condition=ready pod/$pod_name -n zoneapi --timeout=120s; then
+            echo "✅ Pod is ready!"
+            
+            # Test health endpoint with detailed response
+            echo ""
+            echo "Testing health endpoint..."
+            if health_response=$(kubectl exec -n zoneapi "$pod_name" -- curl -f --max-time 15 http://localhost:8080/health 2>/dev/null); then
+              echo "✅ Health endpoint responded successfully!"
+              echo "Health Response: $health_response"
+              
+              # Parse the health response to verify database connectivity
+              if echo "$health_response" | grep -q '"connected":true'; then
+                echo "✅ Database connectivity confirmed!"
+              else
+                echo "⚠️ Database connectivity issue detected in health response"
+              fi
+              
+              # Test a simple API endpoint
+              echo ""
+              echo "Testing Doctors API endpoint..."
+              if kubectl exec -n zoneapi "$pod_name" -- curl -f --max-time 10 http://localhost:8080/api/doctors 2>/dev/null; then
+                echo ""
+                echo "✅ API endpoints are accessible!"
+              else
+                echo "⚠️ API endpoint test failed (may be expected if no data)"
+              fi
+              
+            else
+              echo "❌ Health endpoint test failed!"
+              echo "Checking pod logs for issues..."
+              kubectl logs "$pod_name" -n zoneapi --tail=20
+              exit 1
+            fi
+          else
+            echo "❌ Pod failed to become ready within timeout"
+            kubectl describe pod "$pod_name" -n zoneapi
+            exit 1
+          fi
         else
-          echo "⚠️  No pods found to test"
+          echo "❌ No pods found to test"
+          exit 1
+        fi
+        
+        echo ""
+        echo "🎉 All deployment validation tests passed!"
+    
+    - name: 🧪 Run Comprehensive Deployment Validation
+      run: |
+        echo "=== 🧪 COMPREHENSIVE DEPLOYMENT VALIDATION ==="
+        
+        # Make script executable and run comprehensive validation
+        chmod +x ./scripts/validate-deployment.sh
+        
+        if ./scripts/validate-deployment.sh; then
+          echo ""
+          echo "✅ Comprehensive validation completed successfully!"
+        else
+          echo ""
+          echo "❌ Comprehensive validation failed!"
+          exit 1
         fi 
