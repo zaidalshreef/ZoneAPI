@@ -859,8 +859,8 @@ jobs:
               exit 0
             else
               echo "No running migration pods found"
-              exit 1
-            fi
+          exit 1
+        fi
           fi
         else
           echo "⚠️ No migration jobs found"
