@@ -222,6 +222,20 @@ update_database_secret() {
 run_migration_with_helm() {
   log_with_timestamp "INFO" "Starting migration with Helm (efbundle approach)"
 
+  # Get necessary values from environment or defaults
+  local acr_login_server="${ACR_LOGIN_SERVER:-}"
+  local database_host="${DATABASE_HOST:-}"
+  local db_password="${DB_PASSWORD:-}"
+  local image_tag="${IMAGE_TAG:-latest}"
+
+  if [ -z "$acr_login_server" ] || [ -z "$database_host" ] || [ -z "$db_password" ]; then
+    log_with_timestamp "ERROR" "Missing required environment variables"
+    echo "ACR_LOGIN_SERVER: ${acr_login_server:-[MISSING]}"
+    echo "DATABASE_HOST: ${database_host:-[MISSING]}"
+    echo "DB_PASSWORD: ${db_password:+[PROVIDED]}"
+    return 1
+  fi
+
   # Validate kubectl connectivity
   if ! kubectl cluster-info &>/dev/null; then
     log_with_timestamp "ERROR" "kubectl is not connected to any cluster"
@@ -229,28 +243,31 @@ run_migration_with_helm() {
   fi
   log_with_timestamp "SUCCESS" "kubectl available and connected to cluster"
 
-  # Run single status check at start
-  run_single_status_check
-
   log_with_timestamp "INFO" "Migration configuration validated"
   log_with_timestamp "DEBUG" "ACR Server: $acr_login_server"
   log_with_timestamp "DEBUG" "Database Host: $database_host"
-  log_with_timestamp "DEBUG" "Image Tag: $IMAGE_TAG"
+  log_with_timestamp "DEBUG" "Image Tag: $image_tag"
 
   # Deploy migration job using Helm
   log_with_timestamp "INFO" "Deploying migration job via Helm template"
+
+  # Construct full image path
+  local full_image="${acr_login_server}/zoneapi:${image_tag}"
+  log_with_timestamp "DEBUG" "Full image path: $full_image"
 
   if helm template zoneapi-migration ./charts/zoneapi \
     --namespace "$NAMESPACE" \
     --create-namespace \
     --set migration.enabled=true \
-    --set image.repository="$acr_login_server/zoneapi" \
-    --set image.tag="$IMAGE_TAG" \
+    --set image.repository="${acr_login_server}/zoneapi" \
+    --set image.tag="$image_tag" \
     --set database.host="$database_host" \
     --set database.password="$db_password" \
-    --include-crds \
-    --show-only templates/migration-job.yaml |
-    kubectl apply -f - -n "$NAMESPACE"; then
+    --set database.port=5432 \
+    --set database.name="zone" \
+    --set database.user="postgres" \
+    --set environment="Development" \
+    --set image.pullPolicy="IfNotPresent" | kubectl apply -f -; then
     log_with_timestamp "SUCCESS" "Migration job template applied successfully"
   else
     log_with_timestamp "ERROR" "Failed to apply migration job template"

@@ -256,7 +256,7 @@ jobs:
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
     
     - name: 🧹 Clean Up Old Migration Jobs (Start with Clean Environment)
-      timeout-minutes: 1
+      timeout-minutes: 3
       run: |
         echo "=== 🧹 CLEANING UP OLD MIGRATION JOBS ==="
         echo "Removing all previous migration jobs and pods for a clean start..."
@@ -269,8 +269,28 @@ jobs:
         
         echo "✅ Environment cleaned successfully!"
 
-    - name: 🔍 Pre-Migration Database Connection Tests
+    - name: 🔧 Validate Environment Variables
       timeout-minutes: 1
+      run: |
+        echo "=== 🔧 VALIDATING ENVIRONMENT VARIABLES ==="
+        
+        # Make test script executable
+        chmod +x ./test-env-vars.sh
+        
+        # Set environment variables for testing
+        export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
+        export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
+        export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
+        export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
+        export NAMESPACE="zoneapi"
+        
+        # Run environment variable test
+        ./test-env-vars.sh
+        
+        echo "✅ Environment variables validated!"
+
+    - name: 🔍 Pre-Migration Database Connection Tests
+      timeout-minutes: 3
       run: |
         echo "=== 🔍 PRE-MIGRATION DATABASE CONNECTION TESTS ==="
         echo "Testing database connectivity before starting migration..."
@@ -292,7 +312,7 @@ jobs:
         echo "✅ Database connection pre-checks completed successfully!"
 
     - name: 🧪 Test Database Connection from Kubernetes
-      timeout-minutes: 1
+      timeout-minutes: 3
       run: |
         echo "=== 🧪 TESTING DATABASE CONNECTION FROM KUBERNETES ==="
         
@@ -330,7 +350,7 @@ jobs:
         echo "✅ Kubernetes-to-Database connection test completed!"
 
     - name: 📊 Pre-Migration Database State Check
-      timeout-minutes: 1
+      timeout-minutes: 3
       run: |
         echo "=== 📊 PRE-MIGRATION DATABASE STATE CHECK ==="
         
@@ -367,7 +387,7 @@ jobs:
         echo "✅ Database state check completed!"
 
     - name: Run Database Migration (efbundle Approach) with Enhanced Monitoring
-      timeout-minutes: 1
+      timeout-minutes: 3
       run: |
         echo "=== 🚀 RUNNING DATABASE MIGRATION (EFBUNDLE APPROACH) ==="
         
@@ -453,7 +473,7 @@ jobs:
         fi
 
     - name: 📊 Post-Migration Database Verification
-      timeout-minutes: 1
+      timeout-minutes: 3
       run: |
         echo "=== 📊 POST-MIGRATION DATABASE VERIFICATION ==="
         
@@ -595,7 +615,7 @@ jobs:
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
     
     - name: Deploy Application (Post-Migration)
-      timeout-minutes: 1
+      timeout-minutes: 3
       run: |
         echo "=== DEPLOYING APPLICATION (POST-MIGRATION) ==="
         echo "Image: ${{ steps.acr-info.outputs.login-server }}/${{ env.IMAGE_NAME }}:${{ needs.docker-build-push.outputs.image-tag }}"
