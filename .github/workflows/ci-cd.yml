@@ -485,6 +485,14 @@ jobs:
         ./scripts/monitor-pipeline.sh &
         MONITOR_PID=$!
         
+        # Export environment variables for the migration script
+        export ACR_LOGIN_SERVER="$ACR_LOGIN_SERVER"
+        export DATABASE_HOST="$DATABASE_HOST"
+        export DB_PASSWORD="$DB_PASSWORD"
+        export IMAGE_TAG="$IMAGE_TAG"
+        export NAMESPACE="$NAMESPACE"
+        export TIMEOUT="$TIMEOUT"
+        
         # Run migration using efbundle approach
         echo "🏃‍♂️ Starting migration process..."
         if ./scripts/run-migration.sh; then

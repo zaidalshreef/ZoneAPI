@@ -228,11 +228,18 @@ run_migration_with_helm() {
   local db_password="${DB_PASSWORD:-}"
   local image_tag="${IMAGE_TAG:-latest}"
 
+  log_with_timestamp "DEBUG" "Environment Variables Received:"
+  log_with_timestamp "DEBUG" "ACR_LOGIN_SERVER: ${acr_login_server:-[EMPTY]}"
+  log_with_timestamp "DEBUG" "DATABASE_HOST: ${database_host:-[EMPTY]}"
+  log_with_timestamp "DEBUG" "DB_PASSWORD: ${db_password:+[PROVIDED]}"
+  log_with_timestamp "DEBUG" "IMAGE_TAG: ${image_tag:-[EMPTY]}"
+
   if [ -z "$acr_login_server" ] || [ -z "$database_host" ] || [ -z "$db_password" ]; then
     log_with_timestamp "ERROR" "Missing required environment variables"
     echo "ACR_LOGIN_SERVER: ${acr_login_server:-[MISSING]}"
     echo "DATABASE_HOST: ${database_host:-[MISSING]}"
     echo "DB_PASSWORD: ${db_password:+[PROVIDED]}"
+    echo "IMAGE_TAG: ${image_tag:-[MISSING]}"
     return 1
   fi
 
@@ -254,6 +261,14 @@ run_migration_with_helm() {
   # Construct full image path
   local full_image="${acr_login_server}/zoneapi:${image_tag}"
   log_with_timestamp "DEBUG" "Full image path: $full_image"
+
+  # Debug Helm values being set
+  log_with_timestamp "DEBUG" "Helm Values Being Set:"
+  log_with_timestamp "DEBUG" "  migration.enabled=true"
+  log_with_timestamp "DEBUG" "  image.repository=$acr_login_server/zoneapi"
+  log_with_timestamp "DEBUG" "  image.tag=$image_tag"
+  log_with_timestamp "DEBUG" "  database.host=$database_host"
+  log_with_timestamp "DEBUG" "  database.password=[HIDDEN]"
 
   if helm template zoneapi-migration ./charts/zoneapi \
     --namespace "$NAMESPACE" \
