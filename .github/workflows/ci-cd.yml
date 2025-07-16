@@ -244,8 +244,23 @@ jobs:
         
         cd terraform
         terraform init
-        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)
-        POSTGRES_HOST=$(terraform output -raw postgres_server_fqdn)
+        
+        echo "=== Terraform Outputs Debug ==="
+        terraform output || echo "Failed to get terraform outputs"
+        
+        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server 2>/dev/null || echo "")
+        POSTGRES_HOST=$(terraform output -raw postgres_server_fqdn 2>/dev/null || echo "")
+        
+        echo "Retrieved values:"
+        echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER:-[EMPTY]}"
+        echo "POSTGRES_HOST: ${POSTGRES_HOST:-[EMPTY]}"
+        
+        if [ -z "$ACR_LOGIN_SERVER" ] || [ -z "$POSTGRES_HOST" ]; then
+          echo "❌ Failed to retrieve required Terraform outputs"
+          echo "Available outputs:"
+          terraform output -json | jq -r 'keys[]' || echo "No outputs available"
+          exit 1
+        fi
         
         echo "acr-login-server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
         echo "postgres-host=$POSTGRES_HOST" >> $GITHUB_OUTPUT
@@ -274,9 +289,6 @@ jobs:
       run: |
         echo "=== 🔧 VALIDATING ENVIRONMENT VARIABLES ==="
         
-        # Make test script executable
-        chmod +x ./test-env-vars.sh
-        
         # Set environment variables for testing
         export ACR_LOGIN_SERVER="${{ steps.infra.outputs.acr-login-server }}"
         export DATABASE_HOST="${{ steps.infra.outputs.postgres-host }}"
@@ -284,8 +296,31 @@ jobs:
         export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         export NAMESPACE="zoneapi"
         
-        # Run environment variable test
-        ./test-env-vars.sh
+        # Validate environment variables
+        echo "Required Environment Variables:"
+        echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER:-[NOT SET]}"
+        echo "DATABASE_HOST: ${DATABASE_HOST:-[NOT SET]}"
+        echo "DB_PASSWORD: ${DB_PASSWORD:+[PROVIDED]}"
+        echo "IMAGE_TAG: ${IMAGE_TAG:-[NOT SET]}"
+        echo "NAMESPACE: ${NAMESPACE:-[NOT SET]}"
+        
+        echo ""
+        echo "Constructed Image Path:"
+        if [ -n "$ACR_LOGIN_SERVER" ] && [ -n "$IMAGE_TAG" ]; then
+            echo "Full Image: ${ACR_LOGIN_SERVER}/zoneapi:${IMAGE_TAG}"
+        else
+            echo "❌ Cannot construct image path - missing ACR_LOGIN_SERVER or IMAGE_TAG"
+            exit 1
+        fi
+        
+        echo ""
+        echo "Database Connection String:"
+        if [ -n "$DATABASE_HOST" ] && [ -n "$DB_PASSWORD" ]; then
+            echo "Connection: Host=${DATABASE_HOST};Port=5432;Database=zone;Username=postgres;Password=[HIDDEN];CommandTimeout=300;Timeout=60;"
+        else
+            echo "❌ Cannot construct connection string - missing DATABASE_HOST or DB_PASSWORD"
+            exit 1
+        fi
         
         echo "✅ Environment variables validated!"
 
@@ -398,6 +433,40 @@ jobs:
         export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         export NAMESPACE="zoneapi"
         export TIMEOUT="900"  # Increased timeout for better monitoring
+        
+        # Debug: Check if environment variables are set
+        echo "=== Environment Variable Debug ==="
+        echo "ACR_LOGIN_SERVER from infra step: ${ACR_LOGIN_SERVER:-[EMPTY]}"
+        echo "DATABASE_HOST from infra step: ${DATABASE_HOST:-[EMPTY]}"
+        echo "IMAGE_TAG from docker build: ${IMAGE_TAG:-[EMPTY]}"
+        
+        # Fallback: If ACR_LOGIN_SERVER is empty, try to get it from Terraform directly
+        if [ -z "$ACR_LOGIN_SERVER" ]; then
+          echo "⚠️ ACR_LOGIN_SERVER is empty, attempting to retrieve from Terraform..."
+          cd terraform && terraform init
+          ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server 2>/dev/null || echo "")
+          echo "ACR_LOGIN_SERVER from Terraform: ${ACR_LOGIN_SERVER:-[STILL EMPTY]}"
+          cd ..
+        fi
+        
+        # Fallback: If DATABASE_HOST is empty, try to get it from Terraform directly  
+        if [ -z "$DATABASE_HOST" ]; then
+          echo "⚠️ DATABASE_HOST is empty, attempting to retrieve from Terraform..."
+          cd terraform && terraform init
+          DATABASE_HOST=$(terraform output -raw postgres_server_fqdn 2>/dev/null || echo "")
+          echo "DATABASE_HOST from Terraform: ${DATABASE_HOST:-[STILL EMPTY]}"
+          cd ..
+        fi
+        
+        # Final validation
+        if [ -z "$ACR_LOGIN_SERVER" ] || [ -z "$DATABASE_HOST" ] || [ -z "$DB_PASSWORD" ] || [ -z "$IMAGE_TAG" ]; then
+          echo "❌ Required environment variables are missing:"
+          echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER:-[MISSING]}"
+          echo "DATABASE_HOST: ${DATABASE_HOST:-[MISSING]}"
+          echo "DB_PASSWORD: ${DB_PASSWORD:+[PROVIDED]}"
+          echo "IMAGE_TAG: ${IMAGE_TAG:-[MISSING]}"
+          exit 1
+        fi
         
         echo "Migration Configuration:"
         echo "- ACR: $ACR_LOGIN_SERVER"

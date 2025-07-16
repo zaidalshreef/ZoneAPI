@@ -259,7 +259,7 @@ run_migration_with_helm() {
     --namespace "$NAMESPACE" \
     --create-namespace \
     --set migration.enabled=true \
-    --set image.repository="${acr_login_server}/zoneapi" \
+    --set image.repository="$acr_login_server/zoneapi" \
     --set image.tag="$image_tag" \
     --set database.host="$database_host" \
     --set database.password="$db_password" \
