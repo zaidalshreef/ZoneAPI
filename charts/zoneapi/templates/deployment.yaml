@@ -40,10 +40,10 @@ spec:
       initContainers:
         - name: migration
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            runAsUser: 0  # Run as root for migration to access efbundle
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          workingDir: /out  # Match Dockerfile working directory
+          workingDir: /app  # Set working directory to where efbundle is located
           command: ["./efbundle"]
           args:
             - "--connection"

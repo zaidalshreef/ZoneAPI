@@ -192,6 +192,7 @@ A production-ready RESTful API built with ASP.NET Core for managing healthcare a
 | `setup-terraform-backend.sh` | Terraform backend setup | `./scripts/setup-terraform-backend.sh` |
 | `quick-test-deployment.sh` | Quick deployment test | `./scripts/quick-test-deployment.sh` |
 | `fix-secret-ownership.sh` | Fix Helm secret ownership conflicts | `./scripts/fix-secret-ownership.sh` |
+| `test-init-container-deployment.sh` | Test init container deployment approach | `./scripts/test-init-container-deployment.sh` |
 
 ## 🔄 Enhanced CI/CD Pipeline
 
