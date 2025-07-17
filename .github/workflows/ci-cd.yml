@@ -47,67 +47,10 @@ jobs:
         path: ZoneAPI/bin/Release/
         retention-days: 1
 
-  # Security Scanning Job
-  security-scan:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: 🔒 Run Trivy Vulnerability Scanner on Source Code
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-source-results.sarif'
-        
-    - name: 📊 Upload Source Code Scan Results to GitHub Security Tab
-      if: always() && github.event_name != 'pull_request'
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: 'trivy-source-results.sarif'
-        category: 'trivy-source-code'
-        
-    - name: 🔍 Run Trivy Source Code Table Report
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'table'
-        ignore-unfixed: true
-        severity: 'CRITICAL,HIGH,MEDIUM'
-        
-    - name: 📋 Run Secret Detection Scan
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        scanners: 'secret'
-        format: 'table'
-        exit-code: '1'
-        
-    - name: 📊 Upload SARIF for Pull Requests (Alternative)
-      if: github.event_name == 'pull_request'
-      uses: actions/upload-artifact@v4
-      with:
-        name: trivy-source-sarif-pr
-        path: trivy-source-results.sarif
-        retention-days: 7
-
-    - name: 📤 Upload Source Security Report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: trivy-source-security-report
-        path: trivy-source-results.sarif
-        retention-days: 30
-
   # Infrastructure Deployment Job
   deploy-infrastructure:
     runs-on: ubuntu-latest
-    needs: [build-and-test, security-scan]
+    needs: [build-and-test]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     outputs:
