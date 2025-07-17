@@ -326,6 +326,7 @@ jobs:
           --set livenessProbe.enabled=true \
           --set readinessProbe.enabled=true \
           --set replicaCount=1 \
+          --set debug.enabled=false \
           --force \
           --wait --timeout=5m \
           --debug
