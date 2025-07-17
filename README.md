@@ -35,6 +35,7 @@ A production-ready RESTful API built with ASP.NET Core for managing healthcare a
 - **[Manual Testing Guide](docs/manual-testing-guide.md)** - Step-by-step manual deployment testing
 - **[Database Migration Troubleshooting](docs/database-migration-troubleshooting.md)** - Comprehensive database issue resolution
 - **[Migration Management Guide](docs/migration-management-guide.md)** - Advanced migration strategies
+- **[Init Container Migration Guide](docs/init-container-migration-guide.md)** - Modern init container approach
 
 ### 🛠️ Operations Guides
 - **[CI/CD Deployment Fixes](docs/ci-cd-deployment-fixes.md)** - Pipeline troubleshooting and solutions
