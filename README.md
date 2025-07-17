@@ -9,7 +9,7 @@ A production-ready RESTful API built with ASP.NET Core for managing healthcare a
 - **Container Registry**: Azure Container Registry (ACR) with security scanning
 - **Orchestration**: Azure Kubernetes Service (AKS)
 - **Infrastructure**: Terraform (Infrastructure as Code)
-- **CI/CD**: GitHub Actions with 6-stage security-enabled pipeline
+- **CI/CD**: GitHub Actions with 4-stage security-enabled pipeline
 - **Security**: Trivy vulnerability scanning with GitHub Security integration
 - **Monitoring**: Comprehensive health checks and deployment validation
 
@@ -202,11 +202,13 @@ graph LR
     A[🔨 Build & Test] --> B[🔒 Security Scan]
     B --> C[🏗️ Infrastructure]
     C --> D[🐳 Docker Build + Scan]
-    D --> E[📦 Migration]
-    E --> F[🚀 Deploy Application]
+    D --> E[🚀 Deploy with Init Container]
     
-    B --> G[📊 GitHub Security]
-    D --> H[📋 Security Reports]
+    E --> F[Init: Migration]
+    E --> G[Main: Application]
+    
+    B --> H[📊 GitHub Security]
+    D --> I[📋 Security Reports]
 ```
 
 ### Stage Details
@@ -215,8 +217,9 @@ graph LR
 2. **🔒 Security Scan** - Source code vulnerabilities, secret detection, SARIF reporting
 3. **🏗️ Infrastructure** - Terraform validation, planning, and deployment
 4. **🐳 Docker Build + Scan** - Container building with Trivy security scanning
-5. **📦 Migration** - Database migration with enhanced monitoring
-6. **🚀 Deploy Application** - Helm deployment with health validation
+5. **🚀 Deploy with Init Container** - Helm deployment with init container migration
+   - **Init Container** - Database migration runs first
+   - **Main Container** - Application starts after migration completes
 
 ### Security Integration
 
