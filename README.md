@@ -56,7 +56,7 @@ A production-ready RESTful API built with ASP.NET Core for managing healthcare a
   - Docker Desktop
   - Terraform >= 1.5.0
   - Helm >= 3.12.0
-  - kubectl
+- kubectl
   - .NET 7.0 SDK
   - Azure CLI
 
@@ -93,7 +93,7 @@ A production-ready RESTful API built with ASP.NET Core for managing healthcare a
    cd ZoneAPI
    dotnet ef database update
    dotnet run
-   
+
    # Test API endpoints
    curl http://localhost:5000/health
    ```
@@ -124,25 +124,25 @@ A production-ready RESTful API built with ASP.NET Core for managing healthcare a
 
 #### Step 2: Infrastructure Deployment
 
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
+   ```bash
+   cd terraform
+   cp terraform.tfvars.example terraform.tfvars
 # Edit with your values
 
 # Setup Terraform backend (automated)
 ./scripts/setup-terraform-backend.sh
 
 # Deploy infrastructure
-terraform init
-terraform plan
-terraform apply
-```
+   terraform init
+   terraform plan
+   terraform apply
+   ```
 
 #### Step 3: CI/CD Pipeline Deployment
 
-```bash
+   ```bash
 # Push to trigger the 6-stage pipeline
-git push origin main
+   git push origin main
 
 # Monitor deployment progress
 ./scripts/monitor-pipeline.sh
@@ -190,6 +190,7 @@ git push origin main
 | `setup.sh` | Complete Azure setup | `./scripts/setup.sh` |
 | `setup-terraform-backend.sh` | Terraform backend setup | `./scripts/setup-terraform-backend.sh` |
 | `quick-test-deployment.sh` | Quick deployment test | `./scripts/quick-test-deployment.sh` |
+| `fix-secret-ownership.sh` | Fix Helm secret ownership conflicts | `./scripts/fix-secret-ownership.sh` |
 
 ## 🔄 Enhanced CI/CD Pipeline
 
@@ -457,6 +458,9 @@ All AI-generated components undergo rigorous human review for:
 
 # Clean up stuck migrations
 ./scripts/cleanup-migration-jobs.sh
+
+# Fix Helm secret ownership conflicts
+./scripts/fix-secret-ownership.sh
 ```
 
 ## 📝 License

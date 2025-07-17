@@ -8,7 +8,7 @@ set -e
 
 # Configuration
 NAMESPACE="${NAMESPACE:-zoneapi}"
-TIMEOUT="${TIMEOUT:-60}"  # Reduced from 600 to 60 seconds (1 minute)
+TIMEOUT="${TIMEOUT:-180}"  # 3 minutes to allow for image pull + migration execution
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Colors for output
@@ -138,6 +138,17 @@ monitor_migration_realtime() {
       if [ $((counter % 30)) -eq 0 ]; then # Every 30 seconds
         log_with_timestamp "INFO" "Migration in progress... (${counter}s/${timeout}s) - Status: $status"
         log_with_timestamp "DEBUG" "Pods - Running: $running_pods, Succeeded: $succeeded_pods, Failed: $failed_pods"
+
+        # Check for image pull progress
+        local pod_status=$(kubectl get pods -l job-name="$job_name" -n "$NAMESPACE" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
+        local container_statuses=$(kubectl get pods -l job-name="$job_name" -n "$NAMESPACE" -o jsonpath='{.items[0].status.containerStatuses[0].state}' 2>/dev/null || echo "")
+        
+        if [ "$pod_status" = "Pending" ]; then
+          log_with_timestamp "INFO" "Pod is pending - likely pulling image. This may take 2-3 minutes for large .NET images..."
+          
+          # Show recent image pull events
+          kubectl get events -n "$NAMESPACE" --field-selector reason=Pulling,reason=Pulled --sort-by='.lastTimestamp' | tail -3 | grep -E "(Pulling|Pulled)" || echo "No recent pull events"
+        fi
 
         # Show recent logs if pods are running
         if [ "$running_pods" -gt 0 ]; then

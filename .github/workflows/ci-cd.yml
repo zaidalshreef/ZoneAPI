@@ -339,7 +339,7 @@ jobs:
       uses: azure/setup-helm@v3
       with:
         version: ${{ env.HELM_VERSION }}
-
+    
     - name: 🔐 Create ACR Secret and Namespace Setup
       timeout-minutes: 2
       run: |
@@ -393,7 +393,7 @@ jobs:
         fi
         
         echo "✅ Namespace and secrets setup completed successfully"
-
+    
     - name: 🧹 Clean Up Old Migration Jobs (Start with Clean Environment)
       timeout-minutes: 3
       run: |
@@ -668,7 +668,7 @@ jobs:
         export DB_PASSWORD="${{ secrets.POSTGRES_ADMIN_PASSWORD }}"
         export IMAGE_TAG="${{ needs.docker-build-push.outputs.image-tag }}"
         export NAMESPACE="zoneapi"
-        export TIMEOUT="60"   # 1 minute timeout - migrations should be fast
+        export TIMEOUT="180"  # 3 minute timeout - allows for image pull + migration execution
         
         # Debug: Check if environment variables are set
         echo "=== Environment Variable Debug ==="
@@ -970,8 +970,8 @@ jobs:
               exit 0
             else
               echo "No running migration pods found"
-              exit 1
-            fi
+          exit 1
+        fi
           fi
         else
           echo "⚠️ No migration jobs found"
@@ -1018,7 +1018,7 @@ jobs:
           --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group }} \
           --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
           --overwrite-existing
-
+    
     - name: 🔧 Validate Deployment Configuration
       run: |
         echo "=== 🔧 VALIDATING DEPLOYMENT CONFIGURATION ==="
@@ -1042,6 +1042,57 @@ jobs:
         fi
         
         echo "✅ All deployment variables validated successfully!"
+
+    - name: 🔧 Fix Secret Ownership for Helm
+      timeout-minutes: 2
+      run: |
+        echo "=== 🔧 FIXING SECRET OWNERSHIP FOR HELM ==="
+        
+        # Check if secret exists and has Helm metadata
+        if kubectl get secret zoneapi-db-secret -n zoneapi &>/dev/null; then
+          echo "Secret zoneapi-db-secret exists, checking Helm metadata..."
+          
+          # Check if secret has Helm labels
+          HELM_MANAGED=$(kubectl get secret zoneapi-db-secret -n zoneapi -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
+          
+          if [ "$HELM_MANAGED" != "Helm" ]; then
+            echo "⚠️ Secret not managed by Helm, fixing ownership..."
+            
+            # Save the password value
+            DB_PASSWORD=$(kubectl get secret zoneapi-db-secret -n zoneapi -o jsonpath='{.data.password}' 2>/dev/null || echo "")
+            
+            if [ -n "$DB_PASSWORD" ]; then
+              echo "✅ Retrieved existing password"
+              
+              # Delete the existing secret
+              kubectl delete secret zoneapi-db-secret -n zoneapi --ignore-not-found=true
+              echo "🗑️ Deleted existing secret"
+              
+              # Create new secret with Helm metadata
+              kubectl create secret generic zoneapi-db-secret \
+                --namespace=zoneapi \
+                --from-literal=password="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+                --dry-run=client -o yaml | \
+              kubectl label --local -f - \
+                app.kubernetes.io/managed-by=Helm \
+                app.kubernetes.io/instance=zoneapi \
+                app.kubernetes.io/name=zoneapi -o yaml | \
+              kubectl annotate --local -f - \
+                meta.helm.sh/release-name=zoneapi \
+                meta.helm.sh/release-namespace=zoneapi -o yaml | \
+              kubectl apply -f -
+              
+              echo "✅ Secret recreated with proper Helm metadata"
+            else
+              echo "⚠️ Could not retrieve existing password, will let Helm create new secret"
+              kubectl delete secret zoneapi-db-secret -n zoneapi --ignore-not-found=true
+            fi
+          else
+            echo "✅ Secret already managed by Helm"
+          fi
+        else
+          echo "ℹ️ Secret does not exist, Helm will create it"
+        fi
 
     - name: 🚀 Deploy Application (Post-Migration)
       timeout-minutes: 5
